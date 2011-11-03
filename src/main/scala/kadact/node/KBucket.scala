@@ -18,7 +18,7 @@ class KBucket{
 	
 	object LeastRecentlySeenOrdering extends Ordering[TimestampedContact] {
 		override def compare(x: TimestampedContact, y: TimestampedContact) = {
-			x.compareTo(y)
+			x.compare(y)
 		}
 	}
 	
@@ -40,6 +40,10 @@ class KBucket{
 	
 	def filter(f: (Contact) => Boolean) : Iterable[Contact] = {
 		queue.filter(tc => f(tc.contact)).map(_.contact)
+	}
+	
+	def pickAlphaNodes(): Set[Contact] = {
+		queue.map(_.contact).toSet.take(KadAct.alpha)
 	}
 	
 }
