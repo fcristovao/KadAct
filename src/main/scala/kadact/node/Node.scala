@@ -115,9 +115,9 @@ class Node[V](val nodeID: NodeID) extends Actor {
 			self.reply(FindNodeResponse(this.selfContact, generation, contactsSet))
 		}
 		case GetNodeID => self.reply(nodeID)
-		case StoreInNetwork(key, value) => {
-			
-			
+		case store @ StoreInNetwork(key, value) => {
+			val tmp = actorOf(new StoreInNetworkActor(selfContact, nodeLookupManager)).start()
+			tmp ! store
 		}
 	}
 	
@@ -128,15 +128,34 @@ class Node[V](val nodeID: NodeID) extends Actor {
 	}
 }
 
-class StoreInNetworkActor extends Actor {
+object StoreInNetworkActor {
+	sealed trait State
+	case object Start extends State
+	case object Waiting extends State
+}
+
+class StoreInNetworkActor(originalNode: Contact, nodeLookupManager: ActorRef) extends Actor with FSM[StoreInNetworkActor.State,Option[(Key,Any)]]{
+	import FSM._
+	import StoreInNetworkActor._
 	
-	import Node._
+	startWith(Start, None)
 	
-	def receive = {
-		case StoreInNetwork(key, value) => {
-			
-			
+	when(Start){
+		case Ev(Node.StoreInNetwork(key, value)) => {
+			nodeLookupManager ! NodeLookupManager.Lookup(key)
+			goto(Waiting) using(Some((key, value)))
 		}
 	}
+	
+	when(Waiting){
+		case Event(NodeLookupManager.LookupResponse(nodeID, contacts), Some((key, value))) => {
+			contacts foreach {
+				_.node ! Node.Store(originalNode, key, value)
+			}
+			stop()
+		}
+	}
+	
+	
 }
 
