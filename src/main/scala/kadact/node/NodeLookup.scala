@@ -14,9 +14,9 @@ object NodeLookup {
 	case object AwaitingResponses extends State
 	
 	sealed trait Messages
-	case class Lookup(nodeID: NodeID) extends Messages
+	case class Lookup(generation: Int, nodeID: NodeID) extends Messages
 	case class Timeout(contact: Contact) extends Messages
-	case class LookupResponse(nodeID: NodeID, contacts: Set[Contact]) extends Messages
+	case class LookupResponse(generation: Int, nodeID: NodeID, contacts: Set[Contact]) extends Messages
 	
 	case class Data(nodeID: Option[NodeID] = None, generation: Int = -1, unasked: Set[Contact] = Set(), awaiting: Set[Contact] = Set(), failed: Set[Contact] = Set(), active: Set[Contact] = Set())
 	
@@ -29,7 +29,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	import routing.RoutingTable._
 	import Node._
 	
-	val generationIterator = Iterator from 0
+	//val generationIterator = Iterator from 0
 	
 	def broadcastFindNode(contacts: Set[Contact], generation: Int, nodeID: NodeID){
 		for(contact <- contacts){
@@ -41,13 +41,13 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	startWith(Idle, NullData)
 	
 	when(Idle) {
-		case Ev(Lookup(nodeID)) => 
+		case Ev(Lookup(receivedGeneration, nodeID)) => 
 			val contactsSet = routingTable.?(PickNNodesCloseTo(KadAct.alpha, nodeID))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get
-			val nextGen = generationIterator.next()
+			//val nextGen = generationIterator.next()
 			
-			broadcastFindNode(contactsSet, nextGen, nodeID)
+			broadcastFindNode(contactsSet, receivedGeneration, nodeID)
 			
-			goto(AwaitingResponses) using Data(nodeID = Some(nodeID), generation = nextGen, awaiting = contactsSet)
+			goto(AwaitingResponses) using Data(nodeID = Some(nodeID), generation = receivedGeneration, awaiting = contactsSet)
 	}
 	
 	when(AwaitingResponses) {
@@ -66,7 +66,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 			//What happens when newAwaiting is empty? we should terminate and answer our master
 			
 			if(newActive.size == KadAct.k || newAwaiting.isEmpty) {
-				master ! LookupResponse(nodeID, newActive)
+				master ! LookupResponse(generation, nodeID, newActive)
 				goto(Idle) using NullData
 			} else {
 				broadcastFindNode(contactsSet, generation, nodeID)
@@ -79,7 +79,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 
 			if(contactsSet.isEmpty && awaiting.size == 1){
 				//there's no one else to contact and we were the only ones left
-				master ! LookupResponse(nodeID, active)
+				master ! LookupResponse(dataGeneration, nodeID, active)
 				goto(Idle) using NullData
 			} else {
 				//here, contactsSet may be empty either, but this code will only result in emptying the awaiting set an filling up the failed. Must love higher order ops :)

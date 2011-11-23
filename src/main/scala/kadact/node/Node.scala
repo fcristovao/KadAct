@@ -42,7 +42,7 @@ object Node {
 
 class Node[V](val nodeID: NodeID) extends Actor {
 	import Node._
-	import NodeLookup._
+	import NodeLookupManager._
 	import routing.RoutingTable._
 	
 	var selfContact : Contact = Contact(nodeID, self)
@@ -51,7 +51,7 @@ class Node[V](val nodeID: NodeID) extends Actor {
 	
 	val generation = Iterator from 0
 	val routingTable = actorOf(new RoutingTable(nodeID)).start()
-	val nodeLookupManager = actorOf(new NodeLookupManager(this.self, selfContact, routingTable)).start()
+	val nodeLookupManager = actorOf(new NodeLookupManager(selfContact, routingTable)).start()
 	
 	def this() = this(Node.generateNewNodeID)
 
@@ -127,3 +127,16 @@ class Node[V](val nodeID: NodeID) extends Actor {
 		"KadAct-Node("+nodeID+")"
 	}
 }
+
+class StoreInNetworkActor extends Actor {
+	
+	import Node._
+	
+	def receive = {
+		case StoreInNetwork(key, value) => {
+			
+			
+		}
+	}
+}
+
