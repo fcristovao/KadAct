@@ -8,49 +8,47 @@ import akka.actor.LoggingFSM
 
 //There should be a NodeLookupManager to deal with the creation of NodeLookups
 
-object NodeLookup {
+object ValueLookup {
 	sealed trait State
 	case object Idle extends State
 	case object AwaitingResponses extends State
 	
 	sealed trait Messages
 	case class Timeout(contact: Contact) extends Messages
-	case class LookupNode(generation: Int, nodeID: NodeID) extends Messages
-	case class LookupNodeResponse(generation: Int, nodeID: NodeID, contacts: Set[Contact]) extends Messages
+	case class LookupValue(generation: Int, key: Key) extends Messages
+	case class LookupValueResponse[V](generation: Int, key: Key, answer: Either[V, Set[Contact]]) extends Messages
 	
-	case class Data(nodeID: Option[GenericID] = None, generation: Int = -1, unasked: Set[Contact] = Set(), awaiting: Set[Contact] = Set(), failed: Set[Contact] = Set(), active: Set[Contact] = Set())
+	case class Data(key: Option[Key] = None, generation: Int = -1, unasked: Set[Contact] = Set(), awaiting: Set[Contact] = Set(), failed: Set[Contact] = Set(), active: Set[Contact] = Set())
 	
 	val NullData = Data()
 }
 
-class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[NodeLookup.State, NodeLookup.Data] with LoggingFSM[NodeLookup.State, NodeLookup.Data]{
+class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[ValueLookup.State, ValueLookup.Data] with LoggingFSM[ValueLookup.State, ValueLookup.Data]{
 	import FSM._
-	import NodeLookup._
+	import ValueLookup._
 	import routing.RoutingTable._
 	import Node._
 	
-	//val generationIterator = Iterator from 0
-	
-	def broadcastFindNode(contacts: Set[Contact], generation: Int, nodeID: NodeID){
+	def broadcastFindValue(contacts: Set[Contact], generation: Int, key: Key){
 		for(contact <- contacts){
 			setTimer(contact.nodeID.toString(), Timeout(contact), KadAct.Timeouts.nodeLookup, false)
-			contact.node ! FindNode(originalNode, generation, nodeID)
+			contact.node ! FindValue(originalNode, generation, key)
 		}
 	}
 	
 	startWith(Idle, NullData)
 	
 	when(Idle) {
-		case Ev(LookupNode(receivedGeneration, nodeID)) => 
-			val contactsSet = routingTable.?(PickNNodesCloseTo(KadAct.alpha, nodeID))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get
+		case Ev(LookupValue(receivedGeneration, key)) => 
+			val contactsSet = routingTable.?(PickNNodesCloseTo(KadAct.alpha, key))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get
 			
-			broadcastFindNode(contactsSet, receivedGeneration, nodeID)
+			broadcastFindValue(contactsSet, receivedGeneration, key)
 			
-			goto(AwaitingResponses) using Data(nodeID = Some(nodeID), generation = receivedGeneration, awaiting = contactsSet)
+			goto(AwaitingResponses) using Data(key = Some(key), generation = receivedGeneration, awaiting = contactsSet)
 	}
 	
 	when(AwaitingResponses) {
-		case Event(FindNodeResponse(from, generation, contacts), currentData @ Data(Some(nodeID), dataGeneration, unasked, awaiting, failed, active)) if dataGeneration == generation && awaiting.contains(from) => {
+		case Event(FindValueResponse(from, generation, Right(contacts)), currentData @ Data(Some(key), dataGeneration, unasked, awaiting, failed, active)) if dataGeneration == generation && awaiting.contains(from) => {
 			cancelTimer(from.nodeID.toString())
 
 			routingTable ! Insert(from)
@@ -65,20 +63,30 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 			//What happens when newAwaiting is empty? we should terminate and answer our master
 			
 			if(newActive.size == KadAct.k || newAwaiting.isEmpty) {
-				master ! LookupNodeResponse(generation, nodeID, newActive)
+				master ! LookupValueResponse(generation, key, Right(newActive))
 				goto(Idle) using NullData
 			} else {
-				broadcastFindNode(contactsSet, generation, nodeID)
+				broadcastFindValue(contactsSet, generation, key)
 				
 				stay using currentData.copy(unasked = newUnasked, awaiting = newAwaiting, active = newActive)
 			}
 		}
-		case Event(Timeout(contact), currentData @ Data(Some(nodeID), dataGeneration, unasked, awaiting, failed, active)) if awaiting.contains(contact) => {
+		case Event(FindValueResponse(from, generation, lv @ Left(value)), currentData @ Data(Some(key), dataGeneration, unasked, awaiting, failed, active)) if dataGeneration == generation && awaiting.contains(from) => {
+			//Found the value in the network
+			cancelTimer(from.nodeID.toString())
+
+			routingTable ! Insert(from)
+		
+			master ! LookupValueResponse(generation, key, lv)
+			goto(Idle) using NullData
+		}
+		
+		case Event(Timeout(contact), currentData @ Data(Some(key), dataGeneration, unasked, awaiting, failed, active)) if awaiting.contains(contact) => {
 			val contactsSet = (unasked).take(1)
 
 			if(contactsSet.isEmpty && awaiting.size == 1){
 				//there's no one else to contact and we were the only ones left
-				master ! LookupNodeResponse(dataGeneration, nodeID, active)
+				master ! LookupValueResponse(dataGeneration, key, Right(active))
 				goto(Idle) using NullData
 			} else {
 				//here, contactsSet may be empty either, but this code will only result in emptying the awaiting set and filling up the failed. Must love higher order ops :)
@@ -86,7 +94,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 				val newUnasked = unasked diff contactsSet
 				val newAwaiting = (awaiting - contact) union contactsSet
 				
-				broadcastFindNode(contactsSet, dataGeneration, nodeID)
+				broadcastFindValue(contactsSet, dataGeneration, key)
 				
 				stay using currentData.copy(unasked = newUnasked, awaiting = newAwaiting, failed = newFailed)
 			}

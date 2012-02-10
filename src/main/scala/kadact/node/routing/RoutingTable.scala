@@ -3,10 +3,10 @@ package kadact.node.routing
 import akka.actor.Actor
 import akka.actor.Actor._
 import akka.event.EventHandler
-
 import kadact.KadAct
 import kadact.node.Contact
 import kadact.node._
+import scala.collection.immutable.TreeSet
 
 
 object RoutingTable {
@@ -17,8 +17,10 @@ object RoutingTable {
 	
 }
 
-class RoutingTable(origin: NodeID) extends Actor {
+class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor {
 	import RoutingTable._
+	
+	def this(originalNode: Contact) = this(originalNode, originalNode.nodeID)
 	
 	var rootIDSpace: IDDistanceSpace = new LeafIDSpace(origin)
 	val siblings: SBucket = new SBucket(origin)
@@ -39,13 +41,13 @@ class RoutingTable(origin: NodeID) extends Actor {
 			}
 		}
 		case PickNNodesCloseTo(n, nodeID) => {
-			val result = siblings.pickNNodes(n)
+			/* This is highly inefficient but for now it works as expected */
+			var result = new TreeSet[Contact]()(kadact.node.ContactClosestToOrdering(nodeID))
+			result += originalNode
+			result ++= siblings.pickNNodes(n)
+			result ++= rootIDSpace.pickNNodesCloseTo(n, distance(this.origin, nodeID))
 
-			val tmp = if(result.size < n){
-				(result union rootIDSpace.pickNNodesCloseTo(n - result.size, distance(this.origin, nodeID)))
-			} else {
-				result
-			}
+			val tmp = result.take(n)
 			EventHandler.debug(self, "Picked N nodes: "+tmp)
 			self.reply(tmp)
 		}

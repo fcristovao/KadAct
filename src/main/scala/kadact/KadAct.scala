@@ -69,5 +69,8 @@ class KadAct[V] {
 		internalNode ! Join(Contact(remoteNodeID, remoteNode))
 	}
 	
-	def add() = {}
+	def add(key: Key, value: V) = {
+		internalNode ! StoreInNetwork[V](key, value)
+		
+	}
 }

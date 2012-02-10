@@ -9,23 +9,39 @@ import scala.collection.immutable.Queue
 
 //There should be a NodeLookupManager to deal with the creation of NodeLookups
 
-object NodeLookupManager {
+object LookupManager {
 	//import NodeLookup.{Lookup, LookupResponse}
 	
 	sealed trait State
 	case object Working extends State
 	case object Full extends State
 	
-	sealed trait Messages
-	case class Lookup(nodeID: NodeID) extends Messages
-	case class LookupResponse(nodeID: NodeID, contacts: Set[Contact]) extends Messages
+	sealed trait LookupType
+	case object Node extends LookupType
+	case object Value extends LookupType
 	
-	case class Data(idleList: List[ActorRef] = Nil, workingList: List[ActorRef] = Nil, awaitingActors: Map[Int, ActorRef] = Map(), pendingLookups: Queue[(Lookup, ActorRef)] = Queue())
+	sealed trait Messages
+	case class LookupNode(nodeID: NodeID) extends Messages
+	case class LookupNodeResponse(nodeID: NodeID, contacts: Set[Contact]) extends Messages
+	case class LookupValue(key: Key) extends Messages
+	case class LookupValueResponse[V](key: Key, answer: Either[V, Set[Contact]]) extends Messages
+	
+	object Lookup {
+		def unapply(msg: Messages) : Option[(LookupType, GenericID)] = {
+			msg match {
+				case LookupNode(nodeID) => Some(Node, nodeID)
+				case LookupValue(key) => Some(Value, key)
+				case _ => None
+			}
+		}
+	}
+	
+	case class Data(idleList: List[ActorRef] = Nil, workingList: List[ActorRef] = Nil, awaitingActors: Map[Int, ActorRef] = Map(), pendingLookups: Queue[(Messages, ActorRef)] = Queue())
 }
 
-class NodeLookupManager(originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[NodeLookupManager.State, NodeLookupManager.Data] with LoggingFSM[NodeLookupManager.State, NodeLookupManager.Data]{
+class LookupManager[V](originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[LookupManager.State, LookupManager.Data] with LoggingFSM[LookupManager.State, LookupManager.Data]{
 	import FSM._
-	import NodeLookupManager._
+	import LookupManager._
 	//import NodeLookup.{Lookup, LookupResponse}
 	
 	val generationIterator = Iterator from 0
@@ -33,8 +49,12 @@ class NodeLookupManager(originalNode: Contact, routingTable: ActorRef) extends A
 	startWith(Working, Data(idleList = actorOf(new NodeLookup(this.self, originalNode, routingTable)).start() :: Nil))
 	
 	when(Working){
-		case Event(Lookup(nodeID), currentData @ Data(someWorker :: tail, workList, awaitingActors, _)) => {
+		case Event(Lookup(lookupType, id), currentData @ Data(someWorker :: tail, workList, awaitingActors, _)) => {
 			val nextGen = generationIterator.next()
+			
+			lookupType match {
+				case 
+			}
 			someWorker ! NodeLookup.Lookup(nextGen, nodeID)
 			
 			stay using currentData.copy(idleList = tail, workingList = someWorker :: workList, awaitingActors = awaitingActors + (nextGen -> self.sender.get))

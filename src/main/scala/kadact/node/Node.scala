@@ -5,7 +5,7 @@ import akka.actor.Actor._
 import akka.util.Duration
 import akka.event.EventHandler
 
-
+import scala.collection.mutable.Map
 import scala.util.Random
 import scala.math.BigInt
 
@@ -26,7 +26,7 @@ object Node {
 	case class FindNodeResponse(from: Contact, generation: Int, contacts: Set[Contact]) extends Messages
 	
 	case class FindValue(from: Contact, generation: Int, key: Key) extends Messages
-	case class FindValueResponde[V](from: Contact, generation: Int, answer: Either[V, Set[Contact]])
+	case class FindValueResponse[V](from: Contact, generation: Int, answer: Either[V, Set[Contact]])
 	
 	case class Ping(from: Contact) extends Messages
 	case class Pong(from: Contact) extends Messages
@@ -45,19 +45,15 @@ class Node[V](val nodeID: NodeID) extends Actor {
 	import NodeLookupManager._
 	import routing.RoutingTable._
 	
-	var selfContact : Contact = Contact(nodeID, self)
+	val selfContact: Contact = Contact(nodeID, self)
 	
-	var pendingNodeLookups = Map[Int, Set[Contact]]()
-	
-	val generation = Iterator from 0
-	val routingTable = actorOf(new RoutingTable(nodeID)).start()
+	val routingTable = actorOf(new RoutingTable(selfContact)).start()
 	val nodeLookupManager = actorOf(new NodeLookupManager(selfContact, routingTable)).start()
+	
+	val storedValues = Map[Key, V]()
 	
 	def this() = this(Node.generateNewNodeID)
 
-	override def preStart() = {
-
-	}
 	
 	def beforeStarted: Receive = loggable(self){
 		case Start => {
@@ -75,8 +71,7 @@ class Node[V](val nodeID: NodeID) extends Actor {
 		case LookupResponse(nodeID, _) if this.nodeID == nodeID => { 
 			// IT CAN HAPPEN THAT THE SET RETURNED is empty (when the node we contacted never answered)!!! (must check this case!!!)
 			val setOfNodeIDs = routingTable.?(SelectRandomIDs)/*(timeout = Duration.Inf)*/.as[Set[NodeID]].get
-			//self.sender.get.stop()
-			self.sender.get
+			
 			
 			EventHandler.debug(self, "Random IDs: "+setOfNodeIDs)
 			for(nodeID <- setOfNodeIDs){
@@ -117,7 +112,30 @@ class Node[V](val nodeID: NodeID) extends Actor {
 		case GetNodeID => self.reply(nodeID)
 		case store @ StoreInNetwork(key, value) => {
 			val tmp = actorOf(new StoreInNetworkActor(selfContact, nodeLookupManager)).start()
-			tmp ! store
+			tmp.forward(store)
+		}
+		case Store(from, key, value: V) => {
+			storedValues += (key -> value)
+			self.reply(StoreResponse(selfContact))
+		}
+		case FindValue(fromContact, generation, key) => {
+			routingTable ! Insert(fromContact)
+			
+			storedValues.get(key) match {
+				case None => {
+					val contactsSet = ((routingTable.?(PickNNodesCloseTo(KadAct.k, nodeID))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get) - fromContact)
+					/* ^-- we remove 'fromContact' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
+					 */
+					EventHandler.debug(self, FindValueResponse(this.selfContact, generation, Right(contactsSet)))
+					self.reply(FindValueResponse(this.selfContact, generation, Right(contactsSet)))
+				}
+				case Some(value) => {
+					EventHandler.debug(self, FindValueResponse(this.selfContact, generation, Left(value)))
+					self.reply(FindValueResponse(this.selfContact, generation, Left(value)))
+				}
+			}
+			
+			
 		}
 	}
 	
