@@ -5,7 +5,7 @@ import java.io.IOException
 import java.io.ObjectOutputStream
 import java.io.ObjectInputStream
 
-import akka.serialization.RemoteActorSerialization._
+//import akka.serialization.RemoteActorSerialization._
 
 case class Contact(var nodeID: NodeID, var node: ActorRef) {
 	
@@ -13,7 +13,7 @@ case class Contact(var nodeID: NodeID, var node: ActorRef) {
 	private def nodeID_=(newNodeID: NodeID) : Unit = {
 		nodeID = newNodeID 
 	}
-	*/
+	
 	
 	@throws(classOf[IOException])
 	private def writeObject(out: ObjectOutputStream){
@@ -31,7 +31,7 @@ case class Contact(var nodeID: NodeID, var node: ActorRef) {
 		in.read(tmpArray,0,tmp)
 		node = fromBinaryToRemoteActorRef(tmpArray)
 	}
-	
+	*/
 	override def toString(): String = {
 		"Contact("+nodeID+")"
 	}

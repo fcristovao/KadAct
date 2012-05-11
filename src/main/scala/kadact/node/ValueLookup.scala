@@ -27,7 +27,7 @@ class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRe
 	import FSM._
 	import ValueLookup._
 	import routing.RoutingTable._
-	import Node._
+	import NodeFSM._
 	
 	def broadcastFindValue(contacts: Set[Contact], generation: Int, key: Key){
 		for(contact <- contacts){
@@ -38,6 +38,11 @@ class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRe
 	
 	startWith(Idle, NullData)
 	
+	
+	when(Idle){
+		case _ => stay
+	}
+	/*
 	when(Idle) {
 		case Ev(LookupValue(receivedGeneration, key)) => 
 			val contactsSet = routingTable.?(PickNNodesCloseTo(KadAct.alpha, key))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get
@@ -100,6 +105,6 @@ class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRe
 			}
 		}
 	}
-	
+	*/
 	initialize
 }

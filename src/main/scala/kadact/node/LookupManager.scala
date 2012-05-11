@@ -1,6 +1,6 @@
 package kadact.node
 
-import akka.actor.{Actor, ActorRef, FSM}
+import akka.actor.{Actor, ActorRef, FSM, Props}
 import akka.actor.Actor._
 import akka.util.Duration
 import kadact.KadAct
@@ -12,9 +12,9 @@ import scala.collection.immutable.Queue
 object LookupManager {
 	//import NodeLookup.{Lookup, LookupResponse}
 	
-	sealed trait State
-	case object Working extends State
-	case object Full extends State
+	private[LookupManager] sealed trait State
+	private[LookupManager] case object Working extends State
+	private[LookupManager] case object Full extends State
 	
 	sealed trait LookupType
 	case object Node extends LookupType
@@ -46,55 +46,64 @@ class LookupManager[V](originalNode: Contact, routingTable: ActorRef) extends Ac
 	
 	val generationIterator = Iterator from 0
 	
-	startWith(Working, Data(idleList = actorOf(new NodeLookup(this.self, originalNode, routingTable)).start() :: Nil))
+	startWith(Working, Data())
 	
 	when(Working){
+		//There are idle LookupNodes available to take the request
 		case Event(Lookup(lookupType, id), currentData @ Data(someWorker :: tail, workList, awaitingActors, _)) => {
 			val nextGen = generationIterator.next()
 			
 			lookupType match {
-				case 
+				case Node => someWorker ! NodeLookup.LookupNode(nextGen, id)
+				case Value => //insert here the code for the value lookup
 			}
-			someWorker ! NodeLookup.Lookup(nextGen, nodeID)
 			
-			stay using currentData.copy(idleList = tail, workingList = someWorker :: workList, awaitingActors = awaitingActors + (nextGen -> self.sender.get))
+			stay using currentData.copy(idleList = tail, workingList = someWorker :: workList, awaitingActors = awaitingActors + (nextGen -> sender))
 		}
 		
-		case Event(look @ Lookup(nodeID), currentData @ Data(Nil, workList, awaitingActors,_)) if workList.size < KadAct.maxParallelLookups => {
-			val someWorker = actorOf(new NodeLookup(this.self, originalNode, routingTable)).start()
-			val nextGen = generationIterator.next()
+		//No more idle LookupNodes exist, but we are yet allowed to create more to process this request
+		case Event(lookupMsg @ Lookup(_,_), currentData @ Data(Nil, workList, _,_)) if workList.size < KadAct.maxParallelLookups => {
+			//We just create a new actor and resend the message to be reprocessed. This is to avoid duplicate code, although penalizes performance
+			val someWorker = context.actorOf(Props(new LookupSplitter(this.self, originalNode, routingTable)))
+			//We can't use ! because it would make us the sender, and we don't want that.
+			self forward lookupMsg
 			
-			someWorker ! NodeLookup.Lookup(nextGen, nodeID)
-
-			stay using currentData.copy(workingList = someWorker :: workList, awaitingActors = awaitingActors + (nextGen -> self.sender.get))
+			stay using currentData.copy(List(someWorker))
 		}
 		
-		case Event(look @ Lookup(_), currentData @ Data(Nil, workList, awaitingActors, pendingLookups)) if workList.size == KadAct.maxParallelLookups => {
-			goto(Full) using currentData.copy(pendingLookups = pendingLookups.enqueue((look, self.sender.get)))
+		//No idle LookupNodes exist, and we are no longer allowed to create another
+		case Event(lookupMsg @ Lookup(_,_), currentData @ Data(Nil, workList, awaitingActors, pendingLookups)) if workList.size == KadAct.maxParallelLookups => {
+			goto(Full) using currentData.copy(pendingLookups = pendingLookups.enqueue((lookupMsg, sender)))
 		}
 		
-		case Event(NodeLookup.LookupResponse(generation, nodeID, contacts), currentData @ Data(idleList, workingList, awaitingActors, _)) => {
-			val worker = self.sender.get
+		//We get a response from one of our minions :)
+		case Event(NodeLookup.LookupNodeResponse(generation, nodeID, contacts), currentData @ Data(idleList, workingList, awaitingActors, _)) => {
+			awaitingActors(generation) ! LookupNodeResponse(nodeID, contacts)
 			
-			awaitingActors(generation) ! LookupResponse(nodeID, contacts)
-			
-			stay using currentData.copy(idleList = worker :: idleList, workingList = workingList filterNot(_ == worker), awaitingActors = awaitingActors - generation)
+			stay using currentData.copy(idleList = sender :: idleList, workingList = workingList filterNot(_ == sender), awaitingActors = awaitingActors - generation)
 		}
 		
 	}
 	
 	when(Full) {
-		case Event(look @ Lookup(_), currentData @ Data(_, _, _, pendingLookups)) => {
-			stay using currentData.copy(pendingLookups = pendingLookups.enqueue((look, self.sender.get)))
+		//We're already full, so just save it for later
+		case Event(lookupMsg: Messages, currentData @ Data(_, _, _, pendingLookups)) => {
+			stay using currentData.copy(pendingLookups = pendingLookups.enqueue((lookupMsg, sender)))
 		}
 		
-		case Event(NodeLookup.LookupResponse(generation, nodeID, contacts), currentData @ Data(_, _, awaitingActors, pendingLookups)) => {
-			awaitingActors(generation) ! LookupResponse(nodeID, contacts)
-			val ((Lookup(otherNodeID), newAwaitingActor), newQueue) = pendingLookups.dequeue
-			val someWorker = self.sender.get
+		//When we get a response, just use that minion to make other lookup and carry on
+		case Event(NodeLookup.LookupNodeResponse(generation, nodeID, contacts), currentData @ Data(_, _, awaitingActors, pendingLookups)) => {
+			awaitingActors(generation) ! LookupNodeResponse(nodeID, contacts)
+			
+			val ((Lookup(lookupType, id), newAwaitingActor), newQueue) = pendingLookups.dequeue
+			val someWorker = sender
 			val nextGen = generationIterator.next()
 			
-			someWorker ! NodeLookup.Lookup(nextGen, otherNodeID)
+			lookupType match {
+				case Node => someWorker ! NodeLookup.LookupNode(nextGen, id)
+				case Value => //insert here the code for the value lookup
+			}
+
 			val newAwaitingActors = awaitingActors - generation + (nextGen -> newAwaitingActor)
 			
 			val newState = 

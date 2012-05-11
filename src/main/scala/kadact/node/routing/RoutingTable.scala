@@ -1,11 +1,13 @@
 package kadact.node.routing
 
-import akka.actor.Actor
+import akka.actor.{Actor, ActorLogging}
 import akka.actor.Actor._
-import akka.event.EventHandler
+import akka.event.{Logging, LoggingReceive}
+
 import kadact.KadAct
 import kadact.node.Contact
 import kadact.node._
+
 import scala.collection.immutable.TreeSet
 
 
@@ -17,7 +19,7 @@ object RoutingTable {
 	
 }
 
-class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor {
+class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor with ActorLogging{
 	import RoutingTable._
 	
 	def this(originalNode: Contact) = this(originalNode, originalNode.nodeID)
@@ -25,16 +27,23 @@ class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor {
 	var rootIDSpace: IDDistanceSpace = new LeafIDSpace(origin)
 	val siblings: SBucket = new SBucket(origin)
 	
-	def receive = loggable(self){
+	def receive = LoggingReceive{
 		case Insert(contact) => {
 			if(contact.nodeID != origin){ //"A node should never put its own NodeID into a bucket as a contact"
+				// First we try to insert the contact in our siblings list
 				siblings.insertOrUpdate(contact) match {
-					case (_, Some(removedContact)) => {
-						val (newRoot, result) = this.rootIDSpace.insert(removedContact)
-						this.rootIDSpace = newRoot
+					// The contact was inserted and no ohter contact had to be removed form the siblings list
+					case (true, None) => {
+						// nothing do do
 					}
+					// The contact wasn't inserted (it is too far away), so we must insert it in the other KBuckets
 					case (false, None) => {
 						val (newRoot, result) = this.rootIDSpace.insert(contact)
+						this.rootIDSpace = newRoot
+					}
+					// The contact was inserted and one contact that already existed now must be inserted in the KBuckets
+					case (true, Some(removedContact)) => {
+						val (newRoot, result) = this.rootIDSpace.insert(removedContact)
 						this.rootIDSpace = newRoot
 					}
 				}
@@ -48,12 +57,12 @@ class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor {
 			result ++= rootIDSpace.pickNNodesCloseTo(n, distance(this.origin, nodeID))
 
 			val tmp = result.take(n)
-			EventHandler.debug(self, "Picked N nodes: "+tmp)
-			self.reply(tmp)
+			log.debug("Picked "+n+" nodes: "+tmp)
+			sender ! tmp
 		}
 		case SelectRandomIDs => {
 			val tmp = rootIDSpace.selectRandomNodeIDs()
-			self.reply(tmp)
+			sender ! tmp
 		}
 	}
 	

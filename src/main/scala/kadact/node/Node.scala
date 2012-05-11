@@ -1,9 +1,10 @@
+/*
 package kadact.node
 
-import akka.actor.{Actor, ActorRef, FSM}
+import akka.actor.{Actor, ActorRef, FSM, ActorLogging, Props}
 import akka.actor.Actor._
 import akka.util.Duration
-import akka.event.EventHandler
+import akka.event.{Logging, LoggingReceive}
 
 import scala.collection.mutable.Map
 import scala.util.Random
@@ -40,35 +41,36 @@ object Node {
 	
 }
 
-class Node[V](val nodeID: NodeID) extends Actor {
+class Node[V](val nodeID: NodeID) extends Actor with ActorLogging {
 	import Node._
-	import NodeLookupManager._
+	import LookupManager._
 	import routing.RoutingTable._
+	import context._
 	
 	val selfContact: Contact = Contact(nodeID, self)
 	
-	val routingTable = actorOf(new RoutingTable(selfContact)).start()
-	val nodeLookupManager = actorOf(new NodeLookupManager(selfContact, routingTable)).start()
+	val routingTable = actorOf(Props(new RoutingTable(selfContact)))
+	val lookupManager = actorOf(Props(new LookupManager(selfContact, routingTable)))
 	
 	val storedValues = Map[Key, V]()
 	
 	def this() = this(Node.generateNewNodeID)
 
 	
-	def beforeStarted: Receive = loggable(self){
+	def beforeStarted: Receive = LoggingReceive{
 		case Start => {
-			EventHandler.info(self, "Started KadAct Node with ID: "+nodeID)
+			log.info("Started KadAct Node with ID: "+nodeID)
 			become(normal)
 		}
 		
 		case m @ Join(contact) => {
-			EventHandler.info(self, "Started KadAct Node with ID: "+nodeID)
+			log.info("Started KadAct Node with ID: "+nodeID)
 			routingTable ! Insert(contact)
 			
-			nodeLookupManager ! Lookup(nodeID)
+			lookupManager ! LookupNode(nodeID)
 		}
 		
-		case LookupResponse(nodeID, _) if this.nodeID == nodeID => { 
+		case LookupNodeResponse(nodeID, _) if this.nodeID == nodeID => { 
 			// IT CAN HAPPEN THAT THE SET RETURNED is empty (when the node we contacted never answered)!!! (must check this case!!!)
 			val setOfNodeIDs = routingTable.?(SelectRandomIDs)/*(timeout = Duration.Inf)*/.as[Set[NodeID]].get
 			
@@ -159,7 +161,7 @@ class StoreInNetworkActor(originalNode: Contact, nodeLookupManager: ActorRef) ex
 	startWith(Start, None)
 	
 	when(Start){
-		case Ev(Node.StoreInNetwork(key, value)) => {
+		case Event(Node.StoreInNetwork(key, value),_) => {
 			nodeLookupManager ! NodeLookupManager.Lookup(key)
 			goto(Waiting) using(Some((key, value)))
 		}
@@ -176,4 +178,4 @@ class StoreInNetworkActor(originalNode: Contact, nodeLookupManager: ActorRef) ex
 	
 	
 }
-
+*/

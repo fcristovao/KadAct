@@ -11,10 +11,11 @@ import akka.actor.LoggingFSM
 object NodeLookup {
 	sealed trait State
 	case object Idle extends State
+	case object AwaitingContactsSet extends State
 	case object AwaitingResponses extends State
 	
 	sealed trait Messages
-	case class Timeout(contact: Contact) extends Messages
+	private case class Timeout(contact: Contact) extends Messages
 	case class LookupNode(generation: Int, nodeID: NodeID) extends Messages
 	case class LookupNodeResponse(generation: Int, nodeID: NodeID, contacts: Set[Contact]) extends Messages
 	
@@ -27,7 +28,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	import FSM._
 	import NodeLookup._
 	import routing.RoutingTable._
-	import Node._
+	import NodeFSM._
 	
 	//val generationIterator = Iterator from 0
 	
@@ -41,12 +42,18 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	startWith(Idle, NullData)
 	
 	when(Idle) {
-		case Ev(LookupNode(receivedGeneration, nodeID)) => 
-			val contactsSet = routingTable.?(PickNNodesCloseTo(KadAct.alpha, nodeID))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get
+		case Event(LookupNode(receivedGeneration, nodeID),_) => 
+			routingTable ! PickNNodesCloseTo(KadAct.alpha, nodeID)
 			
-			broadcastFindNode(contactsSet, receivedGeneration, nodeID)
+			goto(AwaitingContactsSet) using Data(nodeID = Some(nodeID), generation = receivedGeneration)
+	}
+	
+	when(AwaitingContactsSet) {
+		case Event(contactsSet : Set[Contact], currentData @ Data(Some(nodeID), dataGeneration, _,_,_,_)) =>
+		
+		broadcastFindNode(contactsSet, dataGeneration, nodeID)
 			
-			goto(AwaitingResponses) using Data(nodeID = Some(nodeID), generation = receivedGeneration, awaiting = contactsSet)
+		goto(AwaitingResponses) using currentData.copy(awaiting = contactsSet)
 	}
 	
 	when(AwaitingResponses) {
@@ -56,7 +63,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 			routingTable ! Insert(from)
 			
 			val newActive = (active + from)
-			val newUnasked = ((unasked union contacts) - originalNode) 
+			val newUnasked = ((unasked union contacts) diff (newActive union awaiting union failed) - originalNode) 
 			/* ^-- we drop 'originalNode' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor. 
 			 * If the requestor does receive such a triple, it should discard it. A node must never put its own nodeID into a bucket as a contact."
 			 */
@@ -69,7 +76,6 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 				goto(Idle) using NullData
 			} else {
 				broadcastFindNode(contactsSet, generation, nodeID)
-				
 				stay using currentData.copy(unasked = newUnasked, awaiting = newAwaiting, active = newActive)
 			}
 		}

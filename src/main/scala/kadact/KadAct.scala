@@ -3,8 +3,11 @@ package kadact
 import akka.actor.Actor._
 import akka.actor.ActorRef
 import akka.util.duration._
-
-import kadact.node.Node
+import kadact.node.NodeFSM
+import akka.actor.ActorSystem
+import akka.actor.Props
+import akka.dispatch.Await
+import akka.util.Timeout
 
 /** Implementation of the Kademlia P2P network
   * "Kademlia: A Peer-to-peer Information System Based on the XOR Metric" (2002)
@@ -24,48 +27,60 @@ import kadact.node.Node
   * http://www-info3.informatik.uni-wuerzburg.de/TR/tr405.pdf
   */
 object KadAct {
-	import config.Config.config
+	import com.typesafe.config.ConfigFactory
+	import collection.JavaConversions._
 	
-	val alpha = config.getInt("kadact.alpha", 3)
-	val B = config.getInt("kadact.B", 160)
-	val k = config.getInt("kadact.k", 20)
-	val s = config.getInt("kadact.s", 20)
+	val config = ConfigFactory.parseMap(Map("kadact.alpha" -> 3, "kadact.B" -> 4, "kadact.k" -> 2, "kadact.s" -> 1, "kadact.timeouts.nodeLookup" -> 5))
+	
+	val alpha = config.getInt("kadact.alpha")//, 3)
+	val B = config.getInt("kadact.B")//, 160)
+	val k = config.getInt("kadact.k")//, 20)
+	val s = config.getInt("kadact.s")//, 20)
 	
 	object Timeouts{
-		val nodeLookup = config.getInt("kadact.timeouts.nodeLookup", 10).seconds
+		val nodeLookup = config.getInt("kadact.timeouts.nodeLookup").seconds//, 10).seconds
 	}
 	
 	val maxParallelLookups = 3
 	
 }
 
-class KadAct[V] {
-	import Node._
+class KadAct[V](hostname: String, localPort: Int) {
+	import NodeFSM._
 	import kadact.node._
+	import com.typesafe.config.ConfigFactory
+
+	require(localPort < 65536)
+
+	val config = ConfigFactory.load()
+	val customConf = ConfigFactory.parseString("""
+      akka.remote {
+				transport = "akka.remote.netty.NettyRemoteTransport"
+				netty {
+					hostname = "%s"
+					port = %d
+				}
+			}
+      """.format(hostname,localPort))
 	
-	var internalNode : ActorRef = _
+	val kadActSys = ActorSystem("KadActSystem", customConf.withFallback(config))
+	val internalNode = kadActSys.actorOf(Props(new NodeFSM[V]),"KadActNode")
 	
-	def start(port: Int){
-		require(port < 65536)
-		
-		internalNode = actorOf(new Node[V])
-		
-		remote.start("localhost", port)
-		remote.register("kadact-service",internalNode)
+	def start(){
 		internalNode ! Start
 	}
 	
-	def join(remoteHost: String, remotePort: Int, localPort: Int){
-		require(remotePort < 65536 && localPort < 65536)
+	def join(remoteHost: String, remotePort: Int){
+		import akka.pattern.ask
+		require(remotePort < 65536)
+		implicit val timeout = KadAct.Timeouts.nodeLookup
 		
-		internalNode = actorOf(new Node()).start()
+		val remoteNode = kadActSys.actorFor("akka://KadActSystem@"+remoteHost+":"+remotePort+"/user/KadActNode")
 		
-		remote.start("localhost", localPort)
-		remote.register("kadact-service",internalNode)
-		val remoteNode = remote.actorFor("kadact-service", remoteHost, remotePort)
-		val remoteNodeID = (remoteNode ? GetNodeID).as[NodeID].get
+		println("Connected: "+(!remoteNode.isTerminated))
 		
-		internalNode.start()
+		val remoteNodeID = Await.result((remoteNode ? GetNodeID)(Timeout(timeout)).mapTo[NodeID], timeout)
+		
 		internalNode ! Join(Contact(remoteNodeID, remoteNode))
 	}
 	
