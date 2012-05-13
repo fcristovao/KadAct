@@ -37,22 +37,27 @@ object NodeFSM {
 	*/
 	
 	sealed trait Messages
-	case object Start extends Messages
-	case class Join(contact: Contact) extends Messages
-	case object GetNodeID extends Messages
-	case class StoreInNetwork[V](key: Key, value: V) extends Messages
 	
-	case class FindNode(from: Contact, generation: Int, nodeID: NodeID) extends Messages
-	case class FindNodeResponse(from: Contact, generation: Int, contacts: Set[Contact]) extends Messages
+	sealed trait InterfaceMessages extends Messages
+	case object Start extends InterfaceMessages
+	case class Join(contact: Contact) extends InterfaceMessages
+	case object GetNodeID extends InterfaceMessages
+	case class AddToNetwork[V](key: Key, value: V) extends InterfaceMessages
+	case class GetFromNetwork[V](key: Key) extends InterfaceMessages
+
 	
-	case class FindValue(from: Contact, generation: Int, key: Key) extends Messages
-	case class FindValueResponse[V](from: Contact, generation: Int, answer: Either[V, Set[Contact]])
+	sealed class ProtocolMessages(from: Contact, generation: Int) extends Messages
+	case class FindNode(from: Contact, generation: Int, nodeID: NodeID) extends ProtocolMessages(from, generation)
+	case class FindNodeResponse(from: Contact, generation: Int, contacts: Set[Contact]) extends ProtocolMessages(from, generation)
 	
-	case class Ping(from: Contact) extends Messages
-	case class Pong(from: Contact) extends Messages
+	case class FindValue(from: Contact, generation: Int, key: Key) extends ProtocolMessages(from, generation)
+	case class FindValueResponse[V](from: Contact, generation: Int, answer: Either[V, Set[Contact]]) extends ProtocolMessages(from, generation)
 	
-	case class Store[V](from: Contact, key: Key, value: V) extends Messages
-	case class StoreResponse(from: Contact) extends Messages
+	case class Ping(from: Contact, generation: Int) extends ProtocolMessages(from, generation)
+	case class Pong(from: Contact, generation: Int) extends ProtocolMessages(from, generation)
+	
+	case class Store[V](from: Contact, generation: Int, key: Key, value: V) extends ProtocolMessages(from, generation)
+	case class StoreResponse(from: Contact, generation: Int) extends ProtocolMessages(from, generation)
 	
 	def generateNewNodeID: NodeID = {
 		BigInt(KadAct.B, random)
@@ -71,8 +76,6 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 	val routingTable = actorOf(Props(new RoutingTable(selfContact)),"RoutingTable")
 	val lookupManager = actorOf(Props(new LookupManager(selfContact, routingTable)),"LookupManager")
 	
-	//val storedValues = Map[Key, V]()
-	
 	def this() = this(NodeFSM.generateNewNodeID)
 
 	def pickNNodesCloseTo(nodeID: NodeID) = {
@@ -82,6 +85,7 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 		import akka.util.Duration
 		import akka.util.duration._
 		
+		//The hardcoded 30 seconds is just a formality. We expect that we'll never need 30 seconds to get a response from the routing table
 		Await.result((routingTable ? PickNNodesCloseTo(KadAct.k, nodeID))(30 seconds).mapTo[Set[Contact]], Duration.Inf)
 	}
 	
@@ -155,7 +159,6 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 		}
 		*/
 		case Event(Store(from, key, value: V), storedValues) => {
-			//storedValues += (key -> value)
 			stay using (storedValues + (key -> value)) replying StoreResponse(selfContact)
 		}
 		
