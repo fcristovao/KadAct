@@ -39,6 +39,12 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 		}
 	}
 	
+	def cancelRemainingTimers(awaitingForContacts: Set[Contact]){
+		for(contact <- awaitingForContacts){
+			cancelTimer(contact.nodeID.toString())
+		}
+	}
+	
 	startWith(Idle, NullData)
 	
 	when(Idle) {
@@ -63,16 +69,18 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 			routingTable ! Insert(from)
 			
 			val newActive = (active + from)
-			val newUnasked = ((unasked union contacts) diff (newActive union awaiting union failed) - originalNode) 
+			val alreadyContacted = (newActive union awaiting union failed)
+			val newUnasked = (((unasked union contacts) -- alreadyContacted) - originalNode) 
 			/* ^-- we drop 'originalNode' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor. 
 			 * If the requestor does receive such a triple, it should discard it. A node must never put its own nodeID into a bucket as a contact."
 			 */
-			val contactsSet = (newUnasked diff (awaiting union failed union active)).take(1)
+			val contactsSet = (newUnasked -- alreadyContacted).take(1)
 			val newAwaiting = ((awaiting - from) union contactsSet)
 			//What happens when newAwaiting is empty? we should terminate and answer our master
 			
 			if(newActive.size == KadAct.k || newAwaiting.isEmpty) {
 				master ! LookupNodeResponse(generation, nodeID, newActive)
+				cancelRemainingTimers(newAwaiting) // We've reached an answer, but we might already have sent requests to other nodes, that are now pending.
 				goto(Idle) using NullData
 			} else {
 				broadcastFindNode(contactsSet, generation, nodeID)
@@ -89,7 +97,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 			} else {
 				//here, contactsSet may be empty either, but this code will only result in emptying the awaiting set and filling up the failed. Must love higher order ops :)
 				val newFailed = (failed + contact)
-				val newUnasked = unasked diff contactsSet
+				val newUnasked = unasked -- contactsSet
 				val newAwaiting = (awaiting - contact) union contactsSet
 				
 				broadcastFindNode(contactsSet, dataGeneration, nodeID)
