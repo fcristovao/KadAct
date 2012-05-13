@@ -1,12 +1,10 @@
-package kadact.node
+package kadact.node.lookup
 
-import akka.actor.{Actor, ActorRef, FSM}
+import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
-import akka.util.Duration
-import kadact.KadAct
-import akka.actor.LoggingFSM
 
-//There should be a NodeLookupManager to deal with the creation of NodeLookups
+import kadact.KadAct
+import kadact.node._
 
 object NodeLookup {
 	sealed trait State

@@ -1,7 +1,9 @@
-package kadact.node
+package kadact.node.lookup
 
-import akka.actor.{Actor, ActorRef, Props, FSM, LoggingFSM}
+import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
+
+import kadact.node._
 
 object LookupSplitter {
 	sealed trait State

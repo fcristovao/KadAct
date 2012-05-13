@@ -39,14 +39,16 @@ object NodeFSM {
 	sealed trait Messages
 	
 	sealed trait InterfaceMessages extends Messages
+	
 	case object Start extends InterfaceMessages
 	case class Join(contact: Contact) extends InterfaceMessages
 	case object GetNodeID extends InterfaceMessages
 	case class AddToNetwork[V](key: Key, value: V) extends InterfaceMessages
 	case class GetFromNetwork[V](key: Key) extends InterfaceMessages
-
+	case object Done extends InterfaceMessages
 	
 	sealed class ProtocolMessages(from: Contact, generation: Int) extends Messages
+	
 	case class FindNode(from: Contact, generation: Int, nodeID: NodeID) extends ProtocolMessages(from, generation)
 	case class FindNodeResponse(from: Contact, generation: Int, contacts: Set[Contact]) extends ProtocolMessages(from, generation)
 	
@@ -67,12 +69,13 @@ object NodeFSM {
 
 class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[Key,V]] with LoggingFSM[NodeFSM.State, Map[Key,V]] {
 	import NodeFSM._
-	import LookupManager._
+	import lookup.LookupManager
+	import lookup.LookupManager._
 	import routing.RoutingTable._
 	import context._
 	
 	val selfContact: Contact = Contact(nodeID, self)
-	
+	val generationIterator = Iterator from 0
 	val routingTable = actorOf(Props(new RoutingTable(selfContact)),"RoutingTable")
 	val lookupManager = actorOf(Props(new LookupManager(selfContact, routingTable)),"LookupManager")
 	
@@ -158,8 +161,9 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 			tmp.forward(store)
 		}
 		*/
-		case Event(Store(from, key, value: V), storedValues) => {
-			stay using (storedValues + (key -> value)) replying StoreResponse(selfContact)
+		case Event(Store(fromContact, generation, key, value: V), storedValues) => {
+			routingTable ! Insert(fromContact)
+			stay using (storedValues + (key -> value)) replying StoreResponse(selfContact, generation)
 		}
 		
 		case Event(FindValue(fromContact, generation, key), storedValues) => {
