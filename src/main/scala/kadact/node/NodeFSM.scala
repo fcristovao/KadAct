@@ -155,12 +155,14 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 			
 			stay replying FindNodeResponse(this.selfContact, generation, contactsSet)
 		}
-		/*
-		case store @ StoreInNetwork(key, value) => {
-			val tmp = actorOf(new StoreInNetworkActor(selfContact, nodeLookupManager)).start()
-			tmp.forward(store)
+		
+		case Event(msg @ AddToNetwork(key, value),_) => {
+			val nextGen = generationIterator.next()
+			val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)),"AddToNetworkActor("+nextGen+")")
+			tmp.forward(msg)
+			stay
 		}
-		*/
+		
 		case Event(Store(fromContact, generation, key, value: V), storedValues) => {
 			routingTable ! Insert(fromContact)
 			stay using (storedValues + (key -> value)) replying StoreResponse(selfContact, generation)
@@ -198,37 +200,3 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 		"KadAct-Node("+nodeID+")"
 	}
 }
-
-/*
-
-object StoreInNetworkActor {
-	sealed trait State
-	case object Start extends State
-	case object Waiting extends State
-}
-
-class StoreInNetworkActor(originalNode: Contact, nodeLookupManager: ActorRef) extends Actor with FSM[StoreInNetworkActor.State,Option[(Key,Any)]]{
-	import FSM._
-	import StoreInNetworkActor._
-	
-	startWith(Start, None)
-	
-	when(Start){
-		case Event(Node.StoreInNetwork(key, value),_) => {
-			nodeLookupManager ! NodeLookupManager.Lookup(key)
-			goto(Waiting) using(Some((key, value)))
-		}
-	}
-	
-	when(Waiting){
-		case Event(NodeLookupManager.LookupResponse(nodeID, contacts), Some((key, value))) => {
-			contacts foreach {
-				_.node ! Node.Store(originalNode, key, value)
-			}
-			stop()
-		}
-	}
-	
-	
-}
-*/
