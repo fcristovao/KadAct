@@ -19,12 +19,22 @@ object NodeFSM {
 	case object Uninitialized extends State
 	case object Joining extends State
 	case object AwaitingRoutingTableResponse extends State
-	case object Initializing extends State
+	//horrible hack :S
+	case object Initializing extends State {
+		var msgsRemaining = 0
+		
+		def apply(msgsRemaining: Int) = {
+			this.msgsRemaining = msgsRemaining
+			this
+		}
+	}
 	case object Working extends State
 	
+	/*
 	sealed trait Data
 	case class MessagesRemaining(n: Int) extends Data
 	class StoredValues[V] extends HashMap[Key,V] with Data
+	*/
 	
 	sealed trait Messages
 	case object Start extends Messages
@@ -50,7 +60,7 @@ object NodeFSM {
 	
 }
 
-class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, NodeFSM.Data] with LoggingFSM[NodeFSM.State, NodeFSM.Data] {
+class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[Key,V]] with LoggingFSM[NodeFSM.State, Map[Key,V]] {
 	import NodeFSM._
 	import LookupManager._
 	import routing.RoutingTable._
@@ -61,7 +71,7 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, NodeF
 	val routingTable = actorOf(Props(new RoutingTable(selfContact)),"RoutingTable")
 	val lookupManager = actorOf(Props(new LookupManager(selfContact, routingTable)),"LookupManager")
 	
-	val storedValues = Map[Key, V]()
+	//val storedValues = Map[Key, V]()
 	
 	def this() = this(NodeFSM.generateNewNodeID)
 
@@ -75,7 +85,7 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, NodeF
 		Await.result((routingTable ? PickNNodesCloseTo(KadAct.k, nodeID))(30 seconds).mapTo[Set[Contact]], Duration.Inf)
 	}
 	
-	startWith(Uninitialized, MessagesRemaining(0))
+	startWith(Uninitialized, Map[Key,V]())
 	
 	when(Uninitialized){
 		case Event(Start, _) => {
@@ -108,16 +118,16 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, NodeF
 				lookupManager ! LookupNode(nodeID)
 			}
 			
-			goto(Initializing) using MessagesRemaining(setOfNodeIDs.size)
+			goto(Initializing(setOfNodeIDs.size)) 
 		}
 	}
 	
 	when(Initializing){
-		case Event(LookupNodeResponse(_,_), MessagesRemaining(howMany)) => {
-			if(howMany > 1)
-				stay using MessagesRemaining(howMany - 1)
+		case Event(LookupNodeResponse(_,_), _) => {
+			if(Initializing.msgsRemaining > 1)
+				goto(Initializing(Initializing.msgsRemaining - 1))
 			else
-				goto(NodeFSM.Working) using MessagesRemaining(0)
+				goto(NodeFSM.Working)
 		}
 		
 		case Event(FindNode(fromContact, generation, nodeID), _) => {
@@ -143,13 +153,13 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, NodeF
 			val tmp = actorOf(new StoreInNetworkActor(selfContact, nodeLookupManager)).start()
 			tmp.forward(store)
 		}
-		case Event(Store(from, key, value: V),_) => {
-			storedValues += (key -> value)
-			stay replying StoreResponse(selfContact)
+		*/
+		case Event(Store(from, key, value: V), storedValues) => {
+			//storedValues += (key -> value)
+			stay using (storedValues + (key -> value)) replying StoreResponse(selfContact)
 		}
 		
-		*/
-		case Event(FindValue(fromContact, generation, key), _) => {
+		case Event(FindValue(fromContact, generation, key), storedValues) => {
 			routingTable ! Insert(fromContact)
 			
 			storedValues.get(key) match {
