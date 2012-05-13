@@ -16,7 +16,7 @@ object RoutingTable {
 	case class Insert(contact: Contact) extends Messages
 	case class PickNNodesCloseTo(n: Int, nodeID: NodeID) extends Messages
 	case object SelectRandomIDs extends Messages
-	
+	case class Failed(contact: Contact) extends Messages
 }
 
 class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor with ActorLogging{
@@ -32,7 +32,7 @@ class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor with Act
 			if(contact.nodeID != origin){ //"A node should never put its own NodeID into a bucket as a contact"
 				// First we try to insert the contact in our siblings list
 				siblings.insertOrUpdate(contact) match {
-					// The contact was inserted and no ohter contact had to be removed form the siblings list
+					// The contact was inserted and no other contact had to be removed from the siblings list
 					case (true, None) => {
 						// nothing do do
 					}
