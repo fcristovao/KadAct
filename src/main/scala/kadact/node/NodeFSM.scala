@@ -15,10 +15,10 @@ object NodeFSM {
 	val SHA1Hasher = java.security.MessageDigest.getInstance("SHA-1")
 	private val random = new Random() 
 	
-	sealed trait State
-	case object Uninitialized extends State
-	case object Joining extends State
-	case object AwaitingRoutingTableResponse extends State
+	private[NodeFSM] sealed trait State
+	private[NodeFSM] case object Uninitialized extends State
+	private[NodeFSM] case object Joining extends State
+	private[NodeFSM] case object AwaitingRoutingTableResponse extends State
 	//horrible hack :S
 	case object Initializing extends State {
 		var msgsRemaining = 0
@@ -83,10 +83,9 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 
 	def pickNNodesCloseTo(nodeID: NodeID) = {
 		import akka.pattern.ask
-		import akka.dispatch.Await
+		import scala.concurrent.Await
 		import akka.util.Timeout
-		import akka.util.Duration
-		import akka.util.duration._
+		import scala.concurrent.duration._
 		
 		//The hardcoded 30 seconds is just a formality. We expect that we'll never need 30 seconds to get a response from the routing table
 		Await.result((routingTable ? PickNNodesCloseTo(KadAct.k, nodeID))(30 seconds).mapTo[Set[Contact]], Duration.Inf)

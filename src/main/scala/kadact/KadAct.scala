@@ -2,11 +2,11 @@ package kadact
 
 import akka.actor.Actor._
 import akka.actor.ActorRef
-import akka.util.duration._
+import scala.concurrent.duration._
 import kadact.node.NodeFSM
 import akka.actor.ActorSystem
 import akka.actor.Props
-import akka.dispatch.Await
+import scala.concurrent.Await
 import akka.util.Timeout
 
 /** Implementation of the Kademlia P2P network
@@ -17,6 +17,7 @@ import akka.util.Timeout
   * "S/Kademlia: A practicable approach towards secure key-based routing" (2007)
   * http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=4447808
   * https://doc.tm.uka.de/SKademlia_2007.pdf
+  * http://telematics.tm.kit.edu/publications/Files/267/SKademlia_slides_2007.pdf
   * 
   * "R/Kademlia: Recursive and topology-aware overlay routing" (2010)
   * http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=5680244
@@ -39,6 +40,7 @@ object KadAct {
 	
 	object Timeouts{
 		val nodeLookup = config.getInt("kadact.timeouts.nodeLookup").seconds//, 10).seconds
+		val storeValue = 5 seconds
 	}
 	
 	val maxParallelLookups = 3
@@ -48,6 +50,7 @@ object KadAct {
 class KadAct[V](hostname: String, localPort: Int) {
 	import NodeFSM._
 	import kadact.node._
+	import akka.pattern.ask
 	import com.typesafe.config.ConfigFactory
 
 	require(localPort < 65536)
@@ -71,7 +74,6 @@ class KadAct[V](hostname: String, localPort: Int) {
 	}
 	
 	def join(remoteHost: String, remotePort: Int){
-		import akka.pattern.ask
 		require(remotePort < 65536)
 		implicit val timeout = KadAct.Timeouts.nodeLookup
 		
@@ -85,7 +87,11 @@ class KadAct[V](hostname: String, localPort: Int) {
 	}
 	
 	def add(key: Key, value: V) = {
-		internalNode ! StoreInNetwork[V](key, value)
-		
+		internalNode ! AddToNetwork[V](key, value)
+	}
+	
+	def get(key: Key): Option[V] = {
+		//Await.result()internalNode ? GetFromNetwork(key)
+		None
 	}
 }
