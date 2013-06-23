@@ -24,6 +24,7 @@ class AddToNetworkActor[V](originalNode: Contact, generation: Int, routingTable:
 	import lookup.LookupManager
 	import kadact.KadAct
 	//import NodeFSM._
+	import kadact.messages._
 	
 	startWith(Start, Data[V]())
 	
@@ -44,12 +45,12 @@ class AddToNetworkActor[V](originalNode: Contact, generation: Int, routingTable:
 			} else {
 				nodesToContact foreach { contact =>
 					setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.storeValue, false)
-					contact.node ! NodeFSM.Store(originalNode, generation, key, value)
+					contact.node ! Store(originalNode, generation, key, value)
 				}
 				stay using currentData.copy(awaiting = awaiting ++ nodesToContact)
 			}
 		}
-		case Event(NodeFSM.StoreResponse(contact, generation), currentData @ Data(_, _, awaiting, answered, _)) 
+		case Event(StoreResponse(contact, generation), currentData @ Data(_, _, awaiting, answered, _)) 
 			if generation == this.generation /* && awaiting.contains(contact) */ => {
 				val newAwaiting = awaiting - contact
 				val newAnswered = answered + contact
