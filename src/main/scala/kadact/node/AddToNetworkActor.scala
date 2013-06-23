@@ -2,6 +2,7 @@ package kadact.node
 
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
+import kadact.config.KadActConfig
 
 
 object AddToNetworkActor {
@@ -17,7 +18,7 @@ object AddToNetworkActor {
 	case class Data[V](replyTo: Option[ActorRef] = None, pair: Option[(Key,V)] = None, awaiting: Set[Contact] = Set(), answered: Set[Contact] = Set(), failed: Set[Contact] = Set())
 }
 
-class AddToNetworkActor[V](originalNode: Contact, generation: Int, routingTable: ActorRef, lookupManager: ActorRef) extends Actor with FSM[AddToNetworkActor.State,AddToNetworkActor.Data[V]]{
+class AddToNetworkActor[V](originalNode: Contact, generation: Int, routingTable: ActorRef, lookupManager: ActorRef)(implicit config: KadActConfig) extends Actor with FSM[AddToNetworkActor.State,AddToNetworkActor.Data[V]]{
 	import FSM._
 	import AddToNetworkActor._
 	import lookup.LookupManager
@@ -42,7 +43,7 @@ class AddToNetworkActor[V](originalNode: Contact, generation: Int, routingTable:
 				goto(Answer)
 			} else {
 				nodesToContact foreach { contact =>
-					setTimer(contact.nodeID.toString(), Timeout(contact), KadAct.Timeouts.storeValue, false)
+					setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.storeValue, false)
 					contact.node ! NodeFSM.Store(originalNode, generation, key, value)
 				}
 				stay using currentData.copy(awaiting = awaiting ++ nodesToContact)

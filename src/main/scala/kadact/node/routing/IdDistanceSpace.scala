@@ -1,28 +1,28 @@
 package kadact.node.routing
 
 import scala.util.Random
-
 import kadact.KadAct
 import kadact.node.Contact
 import kadact.node._
+import kadact.config.KadActConfig
 
-abstract class IDDistanceSpace(val origin: NodeID, val depth: Int, val startDistance: Distance) {
-	val range = BigInt(2).pow(KadAct.B - depth)
+abstract class IdDistanceSpace(val origin: NodeID, val depth: Int, val startDistance: Distance)(implicit config: KadActConfig) {
+	val range = BigInt(2).pow(config.B - depth)
 	val rand = new Random()
 	
-	def insert(contact: Contact): (IDDistanceSpace, Boolean) = {
+	def insert(contact: Contact): (IdDistanceSpace, Boolean) = {
 		insert(contact, distance(origin, contact.nodeID))
 	}
 	
-	def insert(tsContact: TimestampedContact): (IDDistanceSpace, Boolean) = {
+	def insert(tsContact: TimestampedContact): (IdDistanceSpace, Boolean) = {
 		insert(tsContact, distance(origin, tsContact.contact.nodeID))
 	}
 	
-	def insert(contact: Contact, distance: Distance) : (IDDistanceSpace, Boolean) = {
+	def insert(contact: Contact, distance: Distance) : (IdDistanceSpace, Boolean) = {
 		insert(new TimestampedContact(System.currentTimeMillis(), contact), distance)
 	}
 	
-	def insert(tsContact: TimestampedContact, distance: Distance) : (IDDistanceSpace, Boolean)
+	def insert(tsContact: TimestampedContact, distance: Distance) : (IdDistanceSpace, Boolean)
 	
 	def contains(distance: Distance) = {
 		distance >= startDistance && distance < (startDistance + range)
@@ -33,13 +33,18 @@ abstract class IDDistanceSpace(val origin: NodeID, val depth: Int, val startDist
 	def selectRandomNodeIDs() : Set[NodeID]
 	
 	def randomNodeID() = {
-		BigInt(KadAct.B-depth, rand)
+		BigInt(config.B-depth, rand)
 	}
-	
 }
 
-case class SplittedIDSpace(var lower: IDDistanceSpace, var greater: IDDistanceSpace) extends IDDistanceSpace(lower.origin, lower.depth - 1, lower.startDistance) {
-	override def insert(tsContact: TimestampedContact, distance: Distance) : (IDDistanceSpace, Boolean) = {
+object IdDistanceSpace {
+	def apply(origin: NodeID)(implicit config: KadActConfig): IdDistanceSpace = {
+		LeafIdSpace(origin)
+	}
+}
+
+case class SplittedIDSpace(var lower: IdDistanceSpace, var greater: IdDistanceSpace)(implicit config: KadActConfig) extends IdDistanceSpace(lower.origin, lower.depth - 1, lower.startDistance) {
+	override def insert(tsContact: TimestampedContact, distance: Distance) : (IdDistanceSpace, Boolean) = {
 		assert(lower.contains(distance) || greater.contains(distance))
 		
 		val result =
@@ -59,7 +64,7 @@ case class SplittedIDSpace(var lower: IDDistanceSpace, var greater: IDDistanceSp
 		lower.selectRandomNodeIDs() union greater.selectRandomNodeIDs()
 	}
 	
-	protected def spaceClosestTo(distance: Distance): IDDistanceSpace = {
+	protected def spaceClosestTo(distance: Distance): IdDistanceSpace = {
 		if(lower.contains(distance) || distance < startDistance){
 			lower
 		} else if (greater.contains(distance) || distance >= startDistance + range) {
@@ -69,7 +74,7 @@ case class SplittedIDSpace(var lower: IDDistanceSpace, var greater: IDDistanceSp
 		}
 	}
 	
-	protected def spaceFarthestTo(distance: Distance): IDDistanceSpace = {
+	protected def spaceFarthestTo(distance: Distance): IdDistanceSpace = {
 		if(lower.contains(distance)){
 			greater
 		} else if (greater.contains(distance)) {
@@ -79,7 +84,7 @@ case class SplittedIDSpace(var lower: IDDistanceSpace, var greater: IDDistanceSp
 		}
 	}
 	
-	protected def otherHalf(halfSpace: IDDistanceSpace) : IDDistanceSpace = {
+	protected def otherHalf(halfSpace: IdDistanceSpace) : IdDistanceSpace = {
 		if(halfSpace == lower) {
 			greater
 		} else if(halfSpace == greater) {
@@ -102,14 +107,14 @@ case class SplittedIDSpace(var lower: IDDistanceSpace, var greater: IDDistanceSp
 	
 }
 
-case class LeafIDSpace(override val origin: NodeID, override val depth: Int = 0, override val startDistance: Distance = 0) extends IDDistanceSpace(origin, depth, startDistance) {
+case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0, override val startDistance: Distance = 0)(implicit config: KadActConfig) extends IdDistanceSpace(origin, depth, startDistance) {
 	val bucket: KBucket = new KBucket()
 	
 	protected def isSplittable: Boolean = {
 		startDistance == 0
 	}
 	
-	def insert(tsContact: TimestampedContact, distance: Distance) : (IDDistanceSpace, Boolean) = {
+	def insert(tsContact: TimestampedContact, distance: Distance) : (IdDistanceSpace, Boolean) = {
 		assert(this.contains(distance))
 		val (inserted, _) = bucket.insertOrUpdate(tsContact)
 		
@@ -124,8 +129,8 @@ case class LeafIDSpace(override val origin: NodeID, override val depth: Int = 0,
 	def split(): SplittedIDSpace = {
 		import kadact.node
 				
-		val lower = new LeafIDSpace(origin, depth + 1, startDistance)
-		val greater = new LeafIDSpace(origin, depth + 1, startDistance + (range/2))
+		val lower = new LeafIdSpace(origin, depth + 1, startDistance)
+		val greater = new LeafIdSpace(origin, depth + 1, startDistance + (range/2))
 		
 		bucket.
 			filter(contact => lower.contains(node.distance(origin, contact.nodeID))).

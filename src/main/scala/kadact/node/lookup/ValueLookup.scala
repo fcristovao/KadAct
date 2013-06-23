@@ -3,9 +3,9 @@ package kadact.node.lookup
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
 import akka.event.{Logging, LoggingReceive}
-
 import kadact.KadAct
 import kadact.node._
+import kadact.config.KadActConfig
 
 //There should be a NodeLookupManager to deal with the creation of NodeLookups
 
@@ -24,7 +24,7 @@ object ValueLookup {
 	val NullData = Data()
 }
 
-class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[ValueLookup.State, ValueLookup.Data] with LoggingFSM[ValueLookup.State, ValueLookup.Data]{
+class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor with FSM[ValueLookup.State, ValueLookup.Data] with LoggingFSM[ValueLookup.State, ValueLookup.Data]{
 	import FSM._
 	import ValueLookup._
 	import routing.RoutingTable._
@@ -32,7 +32,7 @@ class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRe
 	
 	def broadcastFindValue(contacts: Set[Contact], generation: Int, key: Key){
 		for(contact <- contacts){
-			setTimer(contact.nodeID.toString(), Timeout(contact), KadAct.Timeouts.nodeLookup, false)
+			setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup, false)
 			contact.node ! FindValue(originalNode, generation, key)
 		}
 	}

@@ -3,13 +3,12 @@ package kadact.node
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
 import akka.event.{Logging, LoggingReceive}
-
 import scala.collection.immutable.HashMap
 import scala.util.Random
 import scala.math.BigInt
-
 import kadact.KadAct
 import kadact.node.routing.RoutingTable
+import kadact.config.KadActConfig
 
 object NodeFSM {
 	val SHA1Hasher = java.security.MessageDigest.getInstance("SHA-1")
@@ -61,13 +60,13 @@ object NodeFSM {
 	case class Store[V](from: Contact, generation: Int, key: Key, value: V) extends ProtocolMessages(from, generation)
 	case class StoreResponse(from: Contact, generation: Int) extends ProtocolMessages(from, generation)
 	
-	def generateNewNodeID: NodeID = {
-		BigInt(KadAct.B, random)
+	def generateNewNodeID(implicit config: KadActConfig): NodeID = {
+		BigInt(config.B, random)
 	}
 	
 }
 
-class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[Key,V]] with LoggingFSM[NodeFSM.State, Map[Key,V]] {
+class NodeFSM[V](val nodeID: NodeID)(implicit config: KadActConfig) extends Actor with FSM[NodeFSM.State, Map[Key,V]] with LoggingFSM[NodeFSM.State, Map[Key,V]] {
 	import NodeFSM._
 	import lookup.LookupManager
 	import lookup.LookupManager._
@@ -79,7 +78,7 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 	val routingTable = actorOf(Props(new RoutingTable(selfContact)),"RoutingTable")
 	val lookupManager = actorOf(Props(new LookupManager(selfContact, routingTable)),"LookupManager")
 	
-	def this() = this(NodeFSM.generateNewNodeID)
+	def this()(implicit config: KadActConfig) = this(NodeFSM.generateNewNodeID)
 
 	def pickNNodesCloseTo(nodeID: NodeID) = {
 		import akka.pattern.ask
@@ -88,7 +87,7 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 		import scala.concurrent.duration._
 		
 		//The hardcoded 30 seconds is just a formality. We expect that we'll never need 30 seconds to get a response from the routing table
-		Await.result((routingTable ? PickNNodesCloseTo(KadAct.k, nodeID))(30 seconds).mapTo[Set[Contact]], Duration.Inf)
+		Await.result((routingTable ? PickNNodesCloseTo(config.k, nodeID))(30 seconds).mapTo[Set[Contact]], Duration.Inf)
 	}
 	
 	startWith(Uninitialized, Map[Key,V]())
@@ -157,7 +156,7 @@ class NodeFSM[V](val nodeID: NodeID) extends Actor with FSM[NodeFSM.State, Map[K
 		
 		case Event(msg @ AddToNetwork(key, value),_) => {
 			val nextGen = generationIterator.next()
-			val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)),"AddToNetworkActor("+nextGen+")")
+			val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)),"AddToNetworkActor"+nextGen+"")
 			tmp.forward(msg)
 			stay
 		}

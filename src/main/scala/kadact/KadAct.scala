@@ -8,6 +8,7 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 import scala.concurrent.Await
 import akka.util.Timeout
+import kadact.config.KadActConfig
 
 /** Implementation of the Kademlia P2P network
   * "Kademlia: A Peer-to-peer Information System Based on the XOR Metric" (2002)
@@ -27,32 +28,12 @@ import akka.util.Timeout
   * http://www.springerlink.com/content/v06258j277t27066/
   * http://www-info3.informatik.uni-wuerzburg.de/TR/tr405.pdf
   */
-object KadAct {
-	import com.typesafe.config.ConfigFactory
-	import collection.JavaConversions._
-	
-	val config = ConfigFactory.parseMap(Map("kadact.alpha" -> 3, "kadact.B" -> 4, "kadact.k" -> 2, "kadact.s" -> 1, "kadact.timeouts.nodeLookup" -> 5))
-	
-	val alpha = config.getInt("kadact.alpha")//, 3)
-	val B = config.getInt("kadact.B")//, 160)
-	val k = config.getInt("kadact.k")//, 20)
-	val s = config.getInt("kadact.s")//, 20)
-	
-	object Timeouts{
-		val nodeLookup = config.getInt("kadact.timeouts.nodeLookup").seconds//, 10).seconds
-		val storeValue = 5 seconds
-	}
-	
-	val maxParallelLookups = 3
-	
-}
-
-class KadAct[V](hostname: String, localPort: Int) {
+class KadAct[V](hostname: String, localPort: Int)(implicit kadActConfig: KadActConfig) {
 	import NodeFSM._
 	import kadact.node._
 	import akka.pattern.ask
 	import com.typesafe.config.ConfigFactory
-
+	
 	require(localPort < 65536)
 
 	val config = ConfigFactory.load()
@@ -75,7 +56,7 @@ class KadAct[V](hostname: String, localPort: Int) {
 	
 	def join(remoteHost: String, remotePort: Int){
 		require(remotePort < 65536)
-		implicit val timeout = KadAct.Timeouts.nodeLookup
+		implicit val timeout = kadActConfig.Timeouts.nodeLookup
 		
 		val remoteNode = kadActSys.actorFor("akka://KadActSystem@"+remoteHost+":"+remotePort+"/user/KadActNode")
 		
@@ -87,7 +68,9 @@ class KadAct[V](hostname: String, localPort: Int) {
 	}
 	
 	def add(key: Key, value: V) = {
-		internalNode ! AddToNetwork[V](key, value)
+		val timeout = kadActConfig.Timeouts.storeValue
+		Await.result((internalNode ? AddToNetwork[V](key, value))(Timeout(timeout)).mapTo[NodeID], timeout)
+		
 	}
 	
 	def get(key: Key): Option[V] = {

@@ -3,12 +3,11 @@ package kadact.node.routing
 import akka.actor.{Actor, ActorLogging}
 import akka.actor.Actor._
 import akka.event.{Logging, LoggingReceive}
-
 import kadact.KadAct
 import kadact.node.Contact
 import kadact.node._
-
 import scala.collection.immutable.TreeSet
+import kadact.config.KadActConfig
 
 
 object RoutingTable {
@@ -19,12 +18,12 @@ object RoutingTable {
 	case class Failed(contact: Contact) extends Messages
 }
 
-class RoutingTable(originalNode: Contact, origin: NodeID) extends Actor with ActorLogging{
+class RoutingTable(originalNode: Contact, origin: NodeID)(implicit config: KadActConfig) extends Actor with ActorLogging{
 	import RoutingTable._
 	
-	def this(originalNode: Contact) = this(originalNode, originalNode.nodeID)
+	def this(originalNode: Contact)(implicit config: KadActConfig) = this(originalNode, originalNode.nodeID)
 	
-	var rootIDSpace: IDDistanceSpace = new LeafIDSpace(origin)
+	var rootIDSpace: IdDistanceSpace = IdDistanceSpace(origin)
 	val siblings: SBucket = new SBucket(origin)
 	
 	def receive = LoggingReceive{

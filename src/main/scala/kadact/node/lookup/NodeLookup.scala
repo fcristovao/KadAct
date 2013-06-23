@@ -2,9 +2,9 @@ package kadact.node.lookup
 
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
-
 import kadact.KadAct
 import kadact.node._
+import kadact.config.KadActConfig
 
 object NodeLookup {
 	sealed trait State
@@ -22,7 +22,7 @@ object NodeLookup {
 	val NullData = Data()
 }
 
-class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[NodeLookup.State, NodeLookup.Data] with LoggingFSM[NodeLookup.State, NodeLookup.Data]{
+class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor with FSM[NodeLookup.State, NodeLookup.Data] with LoggingFSM[NodeLookup.State, NodeLookup.Data]{
 	import FSM._
 	import NodeLookup._
 	import routing.RoutingTable._
@@ -32,7 +32,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	
 	def broadcastFindNode(contacts: Set[Contact], generation: Int, nodeID: NodeID){
 		for(contact <- contacts){
-			setTimer(contact.nodeID.toString(), Timeout(contact), KadAct.Timeouts.nodeLookup, false)
+			setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup, false)
 			contact.node ! FindNode(originalNode, generation, nodeID)
 		}
 	}
@@ -47,7 +47,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	
 	when(Idle) {
 		case Event(LookupNode(receivedGeneration, nodeID),_) => 
-			routingTable ! PickNNodesCloseTo(KadAct.alpha, nodeID)
+			routingTable ! PickNNodesCloseTo(config.alpha, nodeID)
 			
 			goto(AwaitingContactsSet) using Data(nodeID = Some(nodeID), generation = receivedGeneration)
 	}
@@ -76,7 +76,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 			val newAwaiting = ((awaiting - from) union contactsSet)
 			//What happens when newAwaiting is empty? we should terminate and answer our master
 			
-			if(newActive.size == KadAct.k || newAwaiting.isEmpty) {
+			if(newActive.size == config.k || newAwaiting.isEmpty) {
 				master ! LookupNodeResponse(generation, nodeID, newActive)
 				cancelRemainingTimers(newAwaiting) // We've reached an answer, but we might already have sent requests to other nodes, that are now pending.
 				goto(Idle) using NullData

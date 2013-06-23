@@ -1,12 +1,12 @@
 package kadact.node.routing
 
 import scala.collection.immutable.TreeSet
-
 import kadact.KadAct
 import kadact.node.Contact
 import kadact.node._
+import kadact.config.KadActConfig
 
-class SBucket(origin: NodeID) extends Bucket(5 * KadAct.s){
+class SBucket(origin: NodeID)(implicit config: KadActConfig) extends Bucket(5 * config.s){
 	override var queue = new TreeSet[TimestampedContact]()(LeastRecentlySeenOrdering)
 	
 	val comparator = ClosestToOrdering(origin)

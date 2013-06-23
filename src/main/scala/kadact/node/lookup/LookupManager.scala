@@ -3,10 +3,10 @@ package kadact.node.lookup
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
 import akka.event.{Logging, LoggingReceive}
-
 import kadact.KadAct
 import kadact.node._
 import scala.collection.immutable.Queue
+import kadact.config.KadActConfig
 
 //There should be a NodeLookupManager to deal with the creation of NodeLookups
 
@@ -40,7 +40,7 @@ object LookupManager {
 	case class Data(idleList: List[ActorRef] = Nil, workingList: List[ActorRef] = Nil, awaitingActors: Map[Int, ActorRef] = Map(), pendingLookups: Queue[(Messages, ActorRef)] = Queue())
 }
 
-class LookupManager[V](originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[LookupManager.State, LookupManager.Data] with LoggingFSM[LookupManager.State, LookupManager.Data]{
+class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor with FSM[LookupManager.State, LookupManager.Data] with LoggingFSM[LookupManager.State, LookupManager.Data]{
 	import FSM._
 	import LookupManager._
 	//import NodeLookup.{Lookup, LookupResponse}
@@ -63,7 +63,7 @@ class LookupManager[V](originalNode: Contact, routingTable: ActorRef) extends Ac
 		}
 		
 		//No more idle LookupNodes exist, but we are yet allowed to create more to process this request
-		case Event(lookupMsg @ Lookup(_,_), currentData @ Data(Nil, workList, _,_)) if workList.size < KadAct.maxParallelLookups => {
+		case Event(lookupMsg @ Lookup(_,_), currentData @ Data(Nil, workList, _,_)) if workList.size < config.maxParallelLookups => {
 			//We just create a new actor and resend the message to be reprocessed. This is to avoid duplicate code, although penalizes performance
 			val someWorker = context.actorOf(Props(new LookupSplitter(this.self, originalNode, routingTable)))
 			//We can't use ! because it would make us the sender, and we don't want that.
@@ -73,7 +73,7 @@ class LookupManager[V](originalNode: Contact, routingTable: ActorRef) extends Ac
 		}
 		
 		//No idle LookupNodes exist, and we are no longer allowed to create another
-		case Event(lookupMsg @ Lookup(_,_), currentData @ Data(Nil, workList, awaitingActors, pendingLookups)) if workList.size == KadAct.maxParallelLookups => {
+		case Event(lookupMsg @ Lookup(_,_), currentData @ Data(Nil, workList, awaitingActors, pendingLookups)) if workList.size == config.maxParallelLookups => {
 			stay using currentData.copy(pendingLookups = pendingLookups.enqueue((lookupMsg, sender)))
 		}
 		

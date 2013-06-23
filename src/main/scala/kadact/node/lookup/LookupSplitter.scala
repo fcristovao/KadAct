@@ -2,8 +2,8 @@ package kadact.node.lookup
 
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, ActorLogging, Props}
 import akka.actor.Actor._
-
 import kadact.node._
+import kadact.config.KadActConfig
 
 object LookupSplitter {
 	sealed trait State
@@ -13,7 +13,7 @@ object LookupSplitter {
 }
 
 
-class LookupSplitter(master: ActorRef, originalNode: Contact, routingTable: ActorRef) extends Actor with FSM[LookupSplitter.State, Unit] with LoggingFSM[LookupSplitter.State, Unit]{
+class LookupSplitter(master: ActorRef, originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor with FSM[LookupSplitter.State, Unit] with LoggingFSM[LookupSplitter.State, Unit]{
 	import LookupSplitter._
 	
 	val nodeLookup = context.actorOf(Props(new NodeLookup(this.self, originalNode, routingTable)),"NodeLookup")
