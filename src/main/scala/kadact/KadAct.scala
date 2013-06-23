@@ -79,4 +79,8 @@ class KadAct[V](hostname: String, localPort: Int)(implicit kadActConfig: KadActC
 		//Await.result()internalNode ? GetFromNetwork(key)
 		None
 	}
+	
+	def stop() = {
+		kadActSys.shutdown()
+	}
 }
