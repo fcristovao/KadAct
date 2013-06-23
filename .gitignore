@@ -1,2 +1,7 @@
 target/
 /bin
+.cache
+.classpath
+.project
+.settings/
+etc/
