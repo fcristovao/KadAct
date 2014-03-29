@@ -40,11 +40,14 @@ object LookupManager {
 	case class Data(idleList: List[ActorRef] = Nil, workingList: List[ActorRef] = Nil, awaitingActors: Map[Int, ActorRef] = Map(), pendingLookups: Queue[(Messages, ActorRef)] = Queue())
 }
 
+trait LookupManagerFactory {
+  def build[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig): LookupManager[V]
+}
+
 class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor with FSM[LookupManager.State, LookupManager.Data] with LoggingFSM[LookupManager.State, LookupManager.Data]{
 	import FSM._
 	import LookupManager._
-	//import NodeLookup.{Lookup, LookupResponse}
-	
+
 	val generationIterator = Iterator from 0
 	
 	startWith(Working, Data())

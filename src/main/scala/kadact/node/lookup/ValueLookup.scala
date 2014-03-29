@@ -28,7 +28,7 @@ class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRe
 	import FSM._
 	import ValueLookup._
 	import routing.RoutingTable._
-	import NodeFSM._
+	import KadActNode._
 	import kadact.messages._
 	
 	def broadcastFindValue(contacts: Set[Contact], generation: Int, key: Key){

@@ -3,7 +3,7 @@ package kadact
 import akka.actor.Actor._
 import akka.actor.ActorRef
 import scala.concurrent.duration._
-import kadact.node.NodeFSM
+import kadact.node.KadActNode
 import akka.actor.ActorSystem
 import akka.actor.Props
 import scala.concurrent.Await
@@ -16,6 +16,9 @@ import kadact.config.KadActConfig
  * [Maymounkov2002]: "Kademlia: A Peer-to-peer Information System Based on the XOR Metric" (2002)
  * http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.16.4785
  * http://people.cs.aau.dk/~bnielsen/DSE04/papers/kademlia.pdf
+ * 
+ * [KademliaSpec]: Kademlia Specification:
+ * http://xlattice.sourceforge.net/components/protocol/kademlia/specs.html
  * 
  * [Baumgart2007]: "S/Kademlia: A practicable approach towards secure key-based routing" (2007)
  * http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=4447808
@@ -31,11 +34,11 @@ import kadact.config.KadActConfig
  * http://www-info3.informatik.uni-wuerzburg.de/TR/tr405.pdf
  */
 class KadAct[V](hostname: String, localPort: Int)(implicit kadActConfig: KadActConfig) {
-	import NodeFSM._
+	import KadActNode._
 	import kadact.node._
 	import akka.pattern.ask
 	import com.typesafe.config.ConfigFactory
-	
+
 	require(localPort < 65536)
 
 	val config = ConfigFactory.load()
@@ -49,29 +52,30 @@ class KadAct[V](hostname: String, localPort: Int)(implicit kadActConfig: KadActC
 			}
       """.format(hostname,localPort))
 	
-	val kadActSys = ActorSystem("KadActSystem", customConf.withFallback(config))
-	val internalNode = kadActSys.actorOf(Props(new NodeFSM[V]),"KadActNode")
+	val kadActSys = ActorSystem("KadActSystem"+localPort, customConf.withFallback(config))
+	val internalNode = kadActSys.actorOf(Props[KadActNode[V]],"KadActNode")
 	
 	def start(){
-		internalNode ! Start
+		val timeout = kadActConfig.Timeouts.storeValue
+		Await.ready((internalNode ? Start)(Timeout(timeout)), timeout)
 	}
 	
 	def join(remoteHost: String, remotePort: Int){
 		require(remotePort < 65536)
 		implicit val timeout = kadActConfig.Timeouts.nodeLookup
 		
-		val remoteNode = kadActSys.actorFor("akka://KadActSystem@"+remoteHost+":"+remotePort+"/user/KadActNode")
+		val remoteNode = kadActSys.actorFor("akka://KadActSystem"+remotePort+"@"+remoteHost+":"+remotePort+"/user/KadActNode")
 		
 		println("Connected: "+(!remoteNode.isTerminated))
 		
-		val remoteNodeID = Await.result((remoteNode ? GetNodeID)(Timeout(timeout)).mapTo[NodeID], timeout)
+		val remoteNodeID = Await.result((remoteNode ? GetContact)(Timeout(timeout)).mapTo[NodeID], timeout)
 		
-		internalNode ! Join(Contact(remoteNodeID, remoteNode))
+		Await.ready((internalNode ? Join(Contact(remoteNodeID, remoteNode)))(Timeout(timeout)), timeout) 
 	}
 	
 	def add(key: Key, value: V) = {
 		val timeout = kadActConfig.Timeouts.storeValue
-		Await.result((internalNode ? AddToNetwork[V](key, value))(Timeout(timeout)).mapTo[NodeID], timeout)
+		Await.ready((internalNode ? AddToNetwork[V](key, value))(Timeout(timeout)), timeout)
 		
 	}
 	

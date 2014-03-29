@@ -18,6 +18,10 @@ object RoutingTable {
 	case class Failed(contact: Contact) extends Messages
 }
 
+trait RoutingTableFactory {
+  def build(originalNode: Contact)(implicit config: KadActConfig) : RoutingTable
+}
+
 class RoutingTable(originalNode: Contact, origin: NodeID)(implicit config: KadActConfig) extends Actor with ActorLogging{
 	import RoutingTable._
 	
@@ -51,7 +55,9 @@ class RoutingTable(originalNode: Contact, origin: NodeID)(implicit config: KadAc
 		case PickNNodesCloseTo(n, nodeID) => {
 			/* This is highly inefficient but for now it works as expected */
 			var result = new TreeSet[Contact]()(kadact.node.ContactClosestToOrdering(nodeID))
-			result += originalNode
+			// FIXME: I don't know if this is really supposed to be here or not
+			// If someone asks for the nodes next to a nodeID, are we supposed to return ourselves as well (if we are indeed close)?
+			result += originalNode  
 			result ++= siblings.pickNNodes(n)
 			result ++= rootIDSpace.pickNNodesCloseTo(n, distance(this.origin, nodeID))
 

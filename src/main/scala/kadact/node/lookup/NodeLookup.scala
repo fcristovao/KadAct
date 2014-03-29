@@ -26,7 +26,7 @@ class NodeLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef
 	import FSM._
 	import NodeLookup._
 	import routing.RoutingTable._
-	import NodeFSM._
+	import KadActNode._
 	import kadact.messages._
 	
 	//val generationIterator = Iterator from 0
