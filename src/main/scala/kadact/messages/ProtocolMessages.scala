@@ -3,7 +3,7 @@ package kadact.messages
 import kadact.node.{NodeID, Key, Contact}
 
 sealed class ProtocolMessages(from: Contact, generation: Int) extends java.io.Serializable
-	
+
 case class FindNode(from: Contact, generation: Int, nodeID: NodeID) extends ProtocolMessages(from, generation)
 case class FindNodeResponse(from: Contact, generation: Int, contacts: Set[Contact]) extends ProtocolMessages(from, generation)
 

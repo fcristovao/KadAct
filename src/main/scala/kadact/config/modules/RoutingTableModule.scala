@@ -9,5 +9,5 @@ class RoutingTableModule extends Module {
   private val factory = new RoutingTableFactory {
     override def build(originalNode: Contact)(implicit config: KadActConfig): RoutingTable = new RoutingTable(originalNode)
   }
-  bind [RoutingTableFactory] to factory
+  bind[RoutingTableFactory] to factory
 }
