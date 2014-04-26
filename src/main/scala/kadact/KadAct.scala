@@ -10,25 +10,25 @@ import kadact.config.KadActConfig
 /**
  * Implementation of the Kademlia P2P network with the Actors Model (with the Akka Library)
  *
- * [Maymounkov2002]: "Kademlia: A Peer-to-peer Information System Based on the XOR Metric" (2002)
+ * [Maymounkov2002]: "Kademlia - A Peer-to-peer Information System Based on the XOR Metric" (2002)
  * http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.16.4785
  * http://people.cs.aau.dk/~bnielsen/DSE04/papers/kademlia.pdf
  *
- * [KademliaSpec]: Kademlia Specification:
+ * [KademliaSpec]: "Kademlia - A Design Specification"
  * http://xlattice.sourceforge.net/components/protocol/kademlia/specs.html
  *
- * [Baumgart2007]: "S/Kademlia: A practicable approach towards secure key-based routing" (2007)
+ * [Baumgart2007]: "S/Kademlia - A practicable approach towards secure key-based routing" (2007)
  * http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=4447808
  * https://doc.tm.uka.de/SKademlia_2007.pdf
  * http://telematics.tm.kit.edu/publications/Files/267/SKademlia_slides_2007.pdf
  *
- * [Heep2010]: "R/Kademlia: Recursive and topology-aware overlay routing" (2010)
+ * [Heep2010]: "R/Kademlia - Recursive and topology-aware overlay routing" (2010)
  * http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=5680244
  * http://telematics.tm.kit.edu/publications/Files/416/RKademlia_2010.pdf
  *
  * [Binzenhöfer2007]: "Improving the Performance and Robustness of Kademlia-based Overlay Networks" (2007)
  * http://www.springerlink.com/content/v06258j277t27066/
- * http://www-info3.informatik.uni-wuerzburg.de/TR/tr405.pdf
+ * http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.84.1292&rep=rep1&type=pdf
  */
 class KadAct[V](hostname: String, localPort: Int)(implicit kadActConfig: KadActConfig) {
   import KadActNode._
