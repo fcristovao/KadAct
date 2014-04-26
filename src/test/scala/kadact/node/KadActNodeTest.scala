@@ -4,7 +4,7 @@ import akka.testkit.{TestProbe, ImplicitSender, TestKit}
 import org.scalatest._
 import kadact.config.TestKadActConfig
 import com.typesafe.config.ConfigFactory
-import akka.actor.{Props, ActorSystem}
+import akka.actor.{ActorRef, Props, ActorSystem}
 import kadact.node.KadActNode._
 import kadact.config.modules.{LookupManagerModule, RoutingTableModule}
 import kadact.node.KadActNode.AddToNetwork
@@ -28,10 +28,10 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
   "An KadActNode actor" when {
     "alone in the network" must {
       "be able to start" in {
-        startKadActNode()
+        start(newKadActNode())
       }
       "return the Contact with the correct nodeId" in {
-        val nodeFSM = startKadActNode(0)
+        val nodeFSM = start(newKadActNode(0))
         nodeFSM ! GetContact
         expectMsg(Contact(BigInt(0),nodeFSM))
       }
@@ -45,14 +45,14 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         expectMsgClass(classOf[Contact])
       }
       "be able to store values" in {
-        val nodeFSM = startKadActNode()
+        val nodeFSM = start(newKadActNode())
         val key: Key = BigInt(1)
 
         nodeFSM ! AddToNetwork(key, 10)
         expectMsg(Done)
       }
       "get previously stored values" in {
-        val nodeFSM = startKadActNode()
+        val nodeFSM = start(newKadActNode())
         val key: Key = BigInt(1)
 
         nodeFSM ! AddToNetwork(key, 10)
@@ -62,7 +62,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         expectMsg(Some(10))
       }
       "not get a value that was never inserted" in {
-        val nodeFSM = startKadActNode()
+        val nodeFSM = start(newKadActNode())
         val key: Key = BigInt(1)
 
         nodeFSM ! GetFromNetwork(key)
@@ -90,7 +90,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         //^- "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
       }
       "get previously stored values when requested to the same node" in {
-        val (first, second) = createTwoNodeKadActNetwork()
+        val (first, _) = createTwoNodeKadActNetwork()
         val key: Key = 1
 
         first.node ! AddToNetwork(key, 10)
@@ -99,21 +99,35 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         first.node ! GetFromNetwork(key)
         expectMsg(Some(10))
       }
+      "get previously stored values when requested to another node" in {
+        val (first, second) = createTwoNodeKadActNetwork()
+        val key: Key = 1
+
+        first.node ! AddToNetwork(key, 10)
+        expectMsg(Done)
+
+        second.node ! GetFromNetwork(key)
+        expectMsg(Some(10))
+      }
     }
   }
 
-  def startKadActNode(nodeId : Int = 0 ) = {
-    val nodeFSM = system.actorOf(Props(new KadActNode[Int](BigInt(nodeId))))
-    nodeFSM ! Start
+  def start(node: ActorRef) = {
+    node ! Start
     expectMsg(Done)
-    nodeFSM
+    node
+  }
+
+
+  private def newKadActNode(nodeId: Int = 0): ActorRef = {
+    system.actorOf(Props(new KadActNode[Int](BigInt(nodeId))))
   }
 
   def createTwoNodeKadActNetwork() = {
     import akka.pattern.{ask, pipe}
     import system.dispatcher
-    val original = startKadActNode()
-    val joining = system.actorOf(Props(new KadActNode[Int](BigInt(15)))) // the farthest away
+    val original = start(newKadActNode())
+    val joining = newKadActNode(15) // the farthest away
 
     (original ? GetContact).mapTo[Contact].map(Join(_)) pipeTo joining
 
