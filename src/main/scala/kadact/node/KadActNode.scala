@@ -150,24 +150,24 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
       routingTable ! Insert(fromContact)
 
       val contactsSet = pickNNodesCloseTo(nodeID) - fromContact
-      // ^-- we remove 'fromContact' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
+      // ^-- Remove 'fromContact' because "[KademliaSpec] The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
       log.debug(FindNodeResponse(selfContact, generation, contactsSet).toString())
 
       stay replying FindNodeResponse(selfContact, generation, contactsSet)
     }
 
-    case Event(Store(fromContact, generation, key, value: V), StoredValues(storedValues: HashMap[Key, V])) => {
+    case Event(kadact.messages.Store(fromContact, generation, key, value: V), StoredValues(storedValues: HashMap[Key, V])) => {
       routingTable ! Insert(fromContact)
       stay using (StoredValues[V](storedValues + (key -> value))) replying StoreResponse(selfContact, generation)
     }
 
-    case Event(FindValue(fromContact, generation, key), StoredValues(storedValues)) => {
+    case Event(kadact.messages.FindValue(fromContact, generation, key), StoredValues(storedValues)) => {
       routingTable ! Insert(fromContact)
 
       storedValues.get(key) match {
         case None => {
           val contactsSet = pickNNodesCloseTo(nodeID) - fromContact
-          // ^-- we remove 'fromContact' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
+          // ^-- Remove 'fromContact' because "[KademliaSpec] The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor"
           log.debug(FindValueResponse(this.selfContact, generation, Right(contactsSet)).toString())
           stay replying FindValueResponse(this.selfContact, generation, Right(contactsSet))
         }
@@ -178,8 +178,12 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
       }
     }
 
+    case Event(kadact.messages.Ping(fromContact, generation), _) => {
+      stay replying kadact.messages.Pong(selfContact, generation)
+    }
+
     // Interface messages:
-    case Event(msg@AddToNetwork(key, value), _) => {
+    case Event(msg @ AddToNetwork(key, value), _) => {
       val nextGen = generationIterator.next()
       val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)), "AddToNetworkActor" + nextGen + "")
       tmp.forward(msg)
