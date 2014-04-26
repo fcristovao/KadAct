@@ -10,6 +10,7 @@ import kadact.config.modules.{LookupManagerModule, RoutingTableModule}
 import kadact.node.KadActNode.AddToNetwork
 import akka.util.Timeout
 import scala.concurrent.duration._
+import scala.concurrent.Await
 
 
 class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
@@ -118,21 +119,24 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     node
   }
 
-
   private def newKadActNode(nodeId: Int = 0): ActorRef = {
     system.actorOf(Props(new KadActNode[Int](BigInt(nodeId))))
   }
 
+  def getContact(node: ActorRef): Contact = {
+    import akka.pattern.ask
+    Await.result((node ? GetContact).mapTo[Contact], timeout.duration)
+  }
+
   def createTwoNodeKadActNetwork() = {
-    import akka.pattern.{ask, pipe}
-    import system.dispatcher
     val original = start(newKadActNode())
+    val originalContact = getContact(original)
+
     val joining = newKadActNode(15) // the farthest away
-
-    (original ? GetContact).mapTo[Contact].map(Join(_)) pipeTo joining
-
+    joining ! Join(originalContact)
     expectMsg(Done)
-    (Contact(BigInt(0), original), Contact(BigInt(15), joining))
+
+    (originalContact, getContact(joining))
   }
 
 
