@@ -3,25 +3,28 @@ package kadact.node.lookup
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM}
 import kadact.node._
 import kadact.config.KadActConfig
+import scala.collection.immutable.TreeSet
 
 object NodeLookup {
   sealed trait State
   case object Idle extends State
   case object AwaitingContactsSet extends State
   case object AwaitingResponses extends State
+  case object Answer extends State
 
   sealed trait Messages
   private case class Timeout(contact: Contact) extends Messages
   case class LookupNode(generation: Int, nodeID: NodeID) extends Messages
   case class LookupNodeResponse(generation: Int, nodeID: NodeID, contacts: Set[Contact]) extends Messages
 
-  case class Data(request: Option[(ActorRef, LookupNode)] = None,
-                  unasked: Set[Contact] = Set(),
-                  waiting: Set[Contact] = Set(),
-                  failed: Set[Contact] = Set(),
-                  active: Set[Contact] = Set())
+  sealed trait Data
+  case class Working(request: (ActorRef, LookupNode),
+                     active: Set[Contact],
+                     unasked: Set[Contact],
+                     waiting: Set[Contact] = Set(),
+                     failed: Set[Contact] = Set()) extends Data
+  case object NullData extends Data
 
-  val NullData = Data()
 }
 
 class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor
@@ -33,7 +36,7 @@ class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config:
 
   def broadcastFindNode(contacts: Set[Contact], generation: Int, nodeID: NodeID) {
     for (contact <- contacts) {
-      setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup, false)
+      setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup)
       contact.node ! FindNode(originalNode, generation, nodeID)
     }
   }
@@ -49,66 +52,87 @@ class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config:
   when(Idle) {
     case Event(msg@LookupNode(_, nodeID), _) =>
       routingTable ! PickNNodesCloseTo(config.alpha, nodeID)
-      goto(AwaitingContactsSet) using Data(request = Some(sender -> msg))
+      val ordering = ContactClosestToOrdering(nodeID)
+      // Our own node is always considered as active and always the closest until one better is found
+      val activeSet = new TreeSet[Contact]()(ordering) + originalNode
+      val unaskedSet = new TreeSet[Contact]()(ordering)
+      goto(AwaitingContactsSet) using Working(
+        request = sender -> msg,
+        active = activeSet,
+        unasked = unaskedSet
+      )
   }
 
   when(AwaitingContactsSet) {
-    case Event(contactsSet: Set[Contact], currentData@Data(Some((answerTo, LookupNode(generation, nodeID))), _, _, _, _)) if contactsSet
-                                                                                                                             .isEmpty => {
-      answerTo ! LookupNodeResponse(generation, nodeID, Set(originalNode))
-      goto(Idle) using NullData
-    }
-    case Event(contactsSet: Set[Contact], currentData@Data(Some((_, LookupNode(generation, nodeID))), _, _, _, _)) => {
-      broadcastFindNode(contactsSet, generation, nodeID)
-      goto(AwaitingResponses) using currentData.copy(waiting = contactsSet)
+    case Event(contactsSet: Set[Contact], currentData@Working((_, LookupNode(generation, nodeID)), _, _, _, _)) => {
+      if (contactsSet.isEmpty) {
+        goto(Answer)
+      } else {
+        broadcastFindNode(contactsSet, generation, nodeID)
+        goto(AwaitingResponses) using currentData.copy(waiting = contactsSet)
+      }
     }
   }
 
   when(AwaitingResponses) {
-    case Event(FindNodeResponse(from, generation, contacts), currentData@Data(Some((answerTo, LookupNode(lookupGeneration, nodeID))), unasked, awaiting, failed, active)) if lookupGeneration == generation && awaiting
-                                                                                                                                                                                                               .contains(from) => {
+    case Event(FindNodeResponse(from, generation, contacts), currentData@Working((_, LookupNode(lookupGeneration, nodeID)), active, unasked, awaiting, failed)) if lookupGeneration == generation && awaiting
+                                                                                                                                                                                                     .contains(from) => {
       cancelTimer(from.nodeID.toString())
 
       routingTable ! Insert(from)
 
-      val newActive = (active + from)
-      val alreadyContacted = (newActive union awaiting union failed)
-      val newUnasked = (((unasked union contacts) -- alreadyContacted) - originalNode)
-      /* ^-- we drop 'originalNode' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor.
-       * If the requestor does receive such a triple, it should discard it. A node must never put its own nodeID into a bucket as a contact."
+      val newActive = active + from
+      val alreadyContacted = newActive union awaiting union failed
+      val newUnasked = ((unasked union contacts) -- alreadyContacted) - originalNode
+      /* ^-- Drop 'originalNode' because:
+       * "[KademliaSpec] The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor.
+       * If the requestor does receive such a triple, it should discard it."
        */
-      val contactsSet = (newUnasked -- alreadyContacted).take(1)
-      val newAwaiting = ((awaiting - from) union contactsSet)
-      //What happens when newAwaiting is empty? we should terminate and answer our master
+      val contactsSet = newUnasked.take(1)
+      val newAwaiting = (awaiting - from) union contactsSet
 
-      if (newActive.size == config.k || newAwaiting.isEmpty) {
-        answerTo ! LookupNodeResponse(generation, nodeID, newActive)
-        cancelRemainingTimers(newAwaiting) // We've reached an answer, but we might already have sent requests to other nodes, that are now pending.
-        goto(Idle) using NullData
+      val newData = currentData.copy(unasked = newUnasked, waiting = newAwaiting, active = newActive)
+
+      // + 1 because we start with the originalNode, but want to find config.k more
+      if (newActive.size == config.k + 1 || newAwaiting.isEmpty) {
+        // We've reached an answer, but we might already have sent requests to other nodes, that are now pending.
+        cancelRemainingTimers(newAwaiting)
+        goto(Answer) using newData
       } else {
         broadcastFindNode(contactsSet, generation, nodeID)
-        stay using currentData.copy(unasked = newUnasked, waiting = newAwaiting, active = newActive)
+        stay using newData
       }
     }
-    case Event(Timeout(contact), currentData@Data(Some((answerTo, LookupNode(generation, nodeID))), unasked, awaiting, failed, active)) if awaiting
-                                                                                                                                           .contains(contact) => {
+    case Event(Timeout(contact), currentData@Working((answerTo, LookupNode(generation, nodeID)), active, unasked, awaiting, failed)) if awaiting
+                                                                                                                                        .contains(contact) => {
+      //contactsSet may be empty, but this code will only result in emptying the awaiting set and filling up the failed.
       val contactsSet = unasked.take(1)
+      val newAwaiting = (awaiting - contact) union contactsSet
+      val newData = currentData.copy(
+        unasked = unasked -- contactsSet,
+        waiting = newAwaiting,
+        failed = failed + contact
+      )
 
-      if (contactsSet.isEmpty && awaiting.size == 1) {
-        //there's no one else to contact and we were the only ones left
-        answerTo ! LookupNodeResponse(generation, nodeID, active)
-        goto(Idle) using NullData
+      if (newAwaiting.size == 0) {
+        //there's no one else to contact
+        goto(Answer) using newData
       } else {
-        //here, contactsSet may be empty either, but this code will only result in emptying the awaiting set and filling up the failed. Must love higher order ops :)
-        val newFailed = (failed + contact)
-        val newUnasked = unasked -- contactsSet
-        val newAwaiting = (awaiting - contact) union contactsSet
-
         broadcastFindNode(contactsSet, generation, nodeID)
-
-        stay using currentData.copy(unasked = newUnasked, waiting = newAwaiting, failed = newFailed)
+        stay using newData
       }
     }
+  }
+
+  when(Answer) {
+    case Event((), Working((answerTo, LookupNode(generation, nodeID)), active, _, _, _)) => {
+      answerTo ! LookupNodeResponse(generation, nodeID, active.take(config.k))
+      goto(Idle) using NullData
+    }
+  }
+
+  onTransition {
+    case _ -> Answer => self !()
   }
 
   initialize()

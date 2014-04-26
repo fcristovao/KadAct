@@ -23,6 +23,8 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     TestKit.shutdownActorSystem(system)
   }
 
+  implicit def intToKey(int: Int) : Key = BigInt(int)
+
   "An KadActNode actor" when {
     "alone in the network" must {
       "be able to start" in {
@@ -73,7 +75,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
       }
       "not get a value that was never inserted" in {
         val (first, second) =createTwoNodeKadActNetwork()
-        val key: Key = BigInt(1)
+        val key: Key = 1
 
         first.node ! GetFromNetwork(key)
         expectMsg(None)
@@ -83,13 +85,13 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
       }
       "handle the FindNode protocol message" in {
         val (first, second) =createTwoNodeKadActNetwork()
-        first.node ! kadact.messages.FindNode(second, 0, BigInt(0)) // Look for key 0 in node 0
+        first.node ! kadact.messages.FindNode(second, 0, 0) // Look for key 0 in node 0
         expectMsg(kadact.messages.FindNodeResponse(first, 0, Set(first)))
         //^- "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
       }
       "get previously stored values when requested to the same node" in {
         val (first, second) = createTwoNodeKadActNetwork()
-        val key: Key = BigInt(1)
+        val key: Key = 1
 
         first.node ! AddToNetwork(key, 10)
         expectMsg(Done)
