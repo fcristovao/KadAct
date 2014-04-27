@@ -49,7 +49,7 @@ class AddToNetworkActor[V](originalNode: Contact, generation: Int, routingTable:
       } else {
         nodesToContact foreach {
           contact =>
-            setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.storeValue, false)
+            setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.storeValue)
             contact.node ! Store(originalNode, generation, key, value)
         }
         stay using currentData.copy(awaiting = awaiting ++ nodesToContact)
