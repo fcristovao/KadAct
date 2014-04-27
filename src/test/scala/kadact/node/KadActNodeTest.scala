@@ -176,7 +176,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     }
 
     "when the network is full of nodes" must {
-      "be able to create such a network" in {
+      "be able to create such a network" ignore {
         val nodes = createKadActNetwork(0 to 15 : _*)
       }
     }
