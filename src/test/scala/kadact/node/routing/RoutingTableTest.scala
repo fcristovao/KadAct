@@ -29,6 +29,13 @@ class RoutingTableTest extends TestKit(ActorSystem("test", ConfigFactory.load("a
       routingTable ! PickNNodesCloseTo(config.k, 1)
       expectMsg(Set())
     }
+    "never insert the contact that refers to its origin" in {
+      val routingTable = newRoutingTable(0)
+      val (_, contacts) = mockContacts(0)
+      routingTable ! Insert(contacts(0))
+      routingTable ! PickNNodesCloseTo(config.k, 1)
+      expectMsg(Set())
+    }
     "return a contact that was inserted" in {
       val routingTable = newRoutingTable(0)
       val (_, contacts) = mockContacts(7)
