@@ -5,7 +5,6 @@ import akka.actor.{Props, ActorSystem}
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, MustMatchers, WordSpecLike}
 import kadact.config.TestKadActConfig
-import kadact.config.modules.{LookupManagerModule, RoutingTableModule}
 import akka.util.Timeout
 import scala.concurrent.duration._
 import kadact.node.Contact
@@ -19,7 +18,6 @@ class NodeLookupTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
                              with BeforeAndAfterAll
                              with TestKadActConfig {
 
-  implicit val injector = new RoutingTableModule :: new LookupManagerModule
   implicit val timeout = Timeout(3 seconds)
 
   override def afterAll() {
