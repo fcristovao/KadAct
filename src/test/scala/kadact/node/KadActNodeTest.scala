@@ -1,13 +1,12 @@
 package kadact.node
 
-import akka.testkit.{EventFilter, TestFSMRef, ImplicitSender, TestKit}
+import akka.testkit.{EventFilter, ImplicitSender, TestKit}
 import org.scalatest._
 import kadact.config.TestKadActConfig
 import com.typesafe.config.ConfigFactory
 import akka.actor._
 import kadact.node.KadActNode._
 import kadact.config.modules.{LookupManagerModule, RoutingTableModule}
-import kadact.node.KadActNode.AddToNetwork
 import akka.util.Timeout
 import scala.concurrent.duration._
 import scala.concurrent.Await
@@ -17,7 +16,6 @@ import kadact.node.KadActNode.AddToNetwork
 import kadact.node.KadActNode.GetFromNetwork
 import scala.Some
 import kadact.node.KadActNode.Error
-import kadact.node.Contact
 
 
 class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
@@ -162,15 +160,15 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
       "be able to store the whole range of keys" in {
         val first :: second :: _ = createKadActNetwork(0, 15)
 
-        for(key <- 0 to 15) {
-          first.node ! AddToNetwork(key, key*100)
+        for (key <- 0 to 15) {
+          first.node ! AddToNetwork(key, key * 100)
           expectMsg(Done)
         }
-        for(key <- 0 to 15) {
+        for (key <- 0 to 15) {
           first.node ! GetFromNetwork(key)
-          expectMsg(Some(key*100))
+          expectMsg(Some(key * 100))
           second.node ! GetFromNetwork(key)
-          expectMsg(Some(key*100))
+          expectMsg(Some(key * 100))
         }
       }
     }
@@ -197,7 +195,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     Await.result((node ? GetContact).mapTo[Contact], timeout.duration)
   }
 
-  def createKadActNetwork(ids: Int*) : List[Contact] = {
+  def createKadActNetwork(ids: Int*): List[Contact] = {
     val original = start(newKadActNode(ids.head))
     val originalContact = getContact(original)
 

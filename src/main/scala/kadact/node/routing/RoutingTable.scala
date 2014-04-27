@@ -1,10 +1,11 @@
 package kadact.node.routing
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.{IndirectActorProducer, Actor, ActorLogging}
 import akka.event.LoggingReceive
 import kadact.node._
 import scala.collection.immutable.TreeSet
 import kadact.config.KadActConfig
+import scaldi.{Injector, Injectable}
 
 
 object RoutingTable {
@@ -16,14 +17,18 @@ object RoutingTable {
 }
 
 trait RoutingTableFactory {
-  def build(originalNode: Contact)(implicit config: KadActConfig): RoutingTable
+  def build(origin: NodeID)(implicit config: KadActConfig): RoutingTable
 }
 
-class RoutingTable(originalNode: Contact, origin: NodeID)(implicit config: KadActConfig) extends Actor
-                                                                                                 with ActorLogging {
-  import RoutingTable._
+class RoutingTableProducer(origin: NodeID)(implicit config: KadActConfig, injector: Injector)
+  extends IndirectActorProducer with Injectable {
+  override def actorClass = classOf[RoutingTable]
 
-  def this(originalNode: Contact)(implicit config: KadActConfig) = this(originalNode, originalNode.nodeID)
+  override def produce = inject[RoutingTableFactory].build(origin)
+}
+
+class RoutingTable(origin: NodeID)(implicit config: KadActConfig) extends Actor with ActorLogging {
+  import RoutingTable._
 
   var rootIDSpace: IdDistanceSpace = IdDistanceSpace(origin)
   val siblings: SBucket = new SBucket(origin)

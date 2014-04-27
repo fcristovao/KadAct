@@ -4,11 +4,11 @@ import akka.actor._
 import scala.collection.immutable.{TreeSet, HashMap}
 import scala.util.Random
 import scala.math.BigInt
-import kadact.node.routing.{RoutingTableFactory, RoutingTable}
+import kadact.node.routing.RoutingTableProducer
 import kadact.config.KadActConfig
 import scala.Some
-import scaldi.{Injector, Injectable}
-import kadact.node.lookup.LookupManagerFactory
+import scaldi.Injector
+import kadact.node.lookup.LookupManagerProducer
 import kadact.node.lookup.LookupManager.{LookupNodeResponse, LookupNode}
 
 object KadActNode {
@@ -54,31 +54,20 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
                                                                                                    with FSM[KadActNode.State, KadActNode.Data]
                                                                                                    with LoggingFSM[KadActNode.State, KadActNode.Data] {
   import KadActNode._
-  import lookup.LookupManager
 
   import routing.RoutingTable._
   import context._
   import kadact.messages._
 
-  require(isValidId(nodeID), "The provided nodeId ("+nodeID+") is not valid.")
-
-  class RoutingTableActorProducer(originalNode: Contact) extends IndirectActorProducer with Injectable {
-    override def actorClass = classOf[RoutingTable]
-
-    override def produce = inject[RoutingTableFactory].build(originalNode)
-  }
-
-  class LookupManagerActorProducer(originalNode: Contact, routingTable: ActorRef) extends IndirectActorProducer
-                                                                                          with Injectable {
-    override def actorClass = classOf[LookupManager[V]]
-
-    override def produce = inject[LookupManagerFactory].build(originalNode, routingTable)
-  }
+  require(isValidId(nodeID), "The provided nodeId (" + nodeID + ") is not valid.")
 
   val selfContact: Contact = Contact(nodeID, self)
   val generationIterator = Iterator from 0
-  val routingTable = actorOf(Props(classOf[RoutingTableActorProducer], this, selfContact), "RoutingTable")
-  val lookupManager = actorOf(Props(classOf[LookupManagerActorProducer], this, selfContact, routingTable), "LookupManager")
+  val routingTable = actorOf(Props(classOf[RoutingTableProducer], nodeID, config, injector), "RoutingTable")
+  val lookupManager = actorOf(
+    Props(classOf[LookupManagerProducer[V]], selfContact, routingTable, config, injector),
+    "LookupManager"
+  )
 
   def this()(implicit config: KadActConfig, injector: Injector) = this(KadActNode.generateNewNodeID)
 
@@ -193,14 +182,14 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
     }
 
     // Interface messages:
-    case Event(msg @ AddToNetwork(key, value), _) if isValidId(key) => {
+    case Event(msg@AddToNetwork(key, value), _) if isValidId(key) => {
       val nextGen = generationIterator.next()
       val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)), "AddToNetworkActor" + nextGen + "")
       tmp.forward(msg)
       stay()
     }
 
-    case Event(msg @ AddToNetwork(key, value), _) if !isValidId(key) => {
+    case Event(msg@AddToNetwork(key, value), _) if !isValidId(key) => {
       stay replying Error(InvalidKey(key))
     }
 

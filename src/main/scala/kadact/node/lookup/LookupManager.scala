@@ -1,10 +1,13 @@
 package kadact.node.lookup
 
-import akka.actor.{Actor, ActorRef, FSM, LoggingFSM, Props}
+import akka.actor._
 import akka.event.LoggingReceive
 import kadact.node._
 import scala.collection.immutable.Queue
 import kadact.config.KadActConfig
+import scala.Some
+import kadact.node.Contact
+import scaldi.{Injector, Injectable}
 
 //There should be a NodeLookupManager to deal with the creation of NodeLookups
 
@@ -40,6 +43,13 @@ object LookupManager {
 
 trait LookupManagerFactory {
   def build[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig): LookupManager[V]
+}
+
+class LookupManagerProducer[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig, injector: Injector)
+  extends IndirectActorProducer with Injectable {
+  override def actorClass = classOf[LookupManager[V]]
+
+  override def produce = inject[LookupManagerFactory].build(originalNode, routingTable)
 }
 
 class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor
