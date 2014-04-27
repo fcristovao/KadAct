@@ -36,9 +36,17 @@ object KadActNode {
   case class AddToNetwork[V](key: Key, value: V) extends InterfaceMessages
   case class GetFromNetwork[V](key: Key) extends InterfaceMessages
   case object Done extends InterfaceMessages
+  case class Error(reason: ErrorReason) extends InterfaceMessages
+
+  sealed trait ErrorReason
+  case class InvalidKey(key: Key) extends ErrorReason
 
   def generateNewNodeID(implicit config: KadActConfig): NodeID = {
     BigInt(config.B, random)
+  }
+
+  def isValidKey(key: Key)(implicit config: KadActConfig): Boolean = {
+    key >= BigInt(0) && key < BigInt(2).pow(config.B)
   }
 }
 
@@ -183,11 +191,15 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
     }
 
     // Interface messages:
-    case Event(msg @ AddToNetwork(key, value), _) => {
+    case Event(msg @ AddToNetwork(key, value), _) if isValidKey(key) => {
       val nextGen = generationIterator.next()
       val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)), "AddToNetworkActor" + nextGen + "")
       tmp.forward(msg)
-      stay
+      stay()
+    }
+
+    case Event(msg @ AddToNetwork(key, value), _) if !isValidKey(key) => {
+      stay replying Error(InvalidKey(key))
     }
 
     case Event(GetFromNetwork(key), StoredValues(storedValues: HashMap[Key, V])) => {

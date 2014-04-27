@@ -27,9 +27,11 @@ object NodeLookup {
 
 }
 
-class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor
-                                                                                                       with FSM[NodeLookup.State, NodeLookup.Data]
-                                                                                                       with LoggingFSM[NodeLookup.State, NodeLookup.Data] {
+class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig)
+  extends Actor
+          with FSM[NodeLookup.State, NodeLookup.Data]
+          with LoggingFSM[NodeLookup.State, NodeLookup.Data] {
+  
   import NodeLookup._
   import routing.RoutingTable._
   import kadact.messages._
@@ -75,8 +77,8 @@ class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config:
   }
 
   when(AwaitingResponses) {
-    case Event(FindNodeResponse(from, generation, contacts), currentData@Working((_, LookupNode(lookupGeneration, nodeID)), active, unasked, awaiting, failed)) if lookupGeneration == generation && awaiting
-                                                                                                                                                                                                     .contains(from) => {
+    case Event(FindNodeResponse(from, generation, contacts), currentData@Working((_, LookupNode(lookupGeneration, nodeID)), active, unasked, awaiting, failed))
+      if lookupGeneration == generation && awaiting.contains(from) => {
       cancelTimer(from.nodeID.toString())
 
       routingTable ! Insert(from)
@@ -103,8 +105,8 @@ class NodeLookup(originalNode: Contact, routingTable: ActorRef)(implicit config:
         stay using newData
       }
     }
-    case Event(Timeout(contact), currentData@Working((answerTo, LookupNode(generation, nodeID)), active, unasked, awaiting, failed)) if awaiting
-                                                                                                                                        .contains(contact) => {
+    case Event(Timeout(contact), currentData@Working((answerTo, LookupNode(generation, nodeID)), active, unasked, awaiting, failed))
+      if awaiting.contains(contact) => {
       //contactsSet may be empty, but this code will only result in emptying the awaiting set and filling up the failed.
       val contactsSet = unasked.take(1)
       val newAwaiting = (awaiting - contact) union contactsSet
