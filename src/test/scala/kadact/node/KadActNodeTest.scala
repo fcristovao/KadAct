@@ -19,9 +19,9 @@ import kadact.node.KadActNode.Error
 
 
 class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
-                             with WordSpecLike with MustMatchers with ImplicitSender with BeforeAndAfterAll {
+                             with WordSpecLike with MustMatchers with ImplicitSender with BeforeAndAfterAll
+                             with TestKadActConfig {
 
-  implicit val config = TestKadActConfig()
   implicit val injector = new RoutingTableModule :: new LookupManagerModule
   implicit val timeout = Timeout(3 seconds)
 
@@ -173,7 +173,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
 
     "when the network is full of nodes" must {
       "be able to create such a network" ignore {
-        val nodes = createKadActNetwork(0 to 15 : _*)
+        val nodes = createKadActNetwork(0 to 15: _*)
       }
     }
   }

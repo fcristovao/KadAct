@@ -12,3 +12,7 @@ object TestKadActConfig {
                                                             "kadact.timeouts.nodeLookup" -> "5"
                                                            )))
 }
+
+trait TestKadActConfig {
+  implicit val config = TestKadActConfig()
+}

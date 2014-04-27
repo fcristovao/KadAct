@@ -11,9 +11,9 @@ import kadact.nodeForTest._
 import kadact.node.routing.RoutingTable.{Insert, PickNNodesCloseTo}
 
 class RoutingTableTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
-                               with WordSpecLike with MustMatchers with ImplicitSender with BeforeAndAfterAll {
+                               with WordSpecLike with MustMatchers with ImplicitSender with BeforeAndAfterAll
+                               with TestKadActConfig {
 
-  implicit val config = TestKadActConfig()
   implicit val timeout = Timeout(3 seconds)
 
   override def afterAll() {

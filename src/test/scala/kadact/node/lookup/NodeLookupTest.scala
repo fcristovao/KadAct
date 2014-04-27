@@ -16,8 +16,9 @@ class NodeLookupTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
                              with WordSpecLike
                              with MustMatchers
                              with ImplicitSender
-                             with BeforeAndAfterAll {
-  implicit val config = TestKadActConfig()
+                             with BeforeAndAfterAll
+                             with TestKadActConfig {
+
   implicit val injector = new RoutingTableModule :: new LookupManagerModule
   implicit val timeout = Timeout(3 seconds)
 
