@@ -60,7 +60,7 @@ class RoutingTable(origin: NodeID)(implicit config: KadActConfig) extends Actor 
       /* This is highly inefficient but for now it works as expected */
       var result = new TreeSet[Contact]()(kadact.node.ContactClosestToOrdering(nodeID))
       result ++= siblings.pickNNodes(n)
-      result ++= rootIDSpace.pickNNodesCloseTo(n, distance(this.origin, nodeID))
+      result ++= rootIDSpace.pickNNodesCloseTo(n, nodeID)
 
       val tmp = result.take(n)
       log.debug("Picked " + n + " nodes: " + tmp)
