@@ -35,15 +35,15 @@ class RoutingTable(origin: NodeID)(implicit config: KadActConfig) extends Actor 
 
   def receive = LoggingReceive {
     case Insert(contact) => {
+      //"[KademliaSpec] A node should never put its own NodeID into a bucket as a contact"
       if (contact.nodeID != origin) {
-        //"A node should never put its own NodeID into a bucket as a contact"
-        // First we try to insert the contact in our siblings list
+        // Try to insert the contact in our siblings list
         siblings.insertOrUpdate(contact) match {
           // The contact was inserted and no other contact had to be removed from the siblings list
           case (true, None) => {
             // nothing do do
           }
-          // The contact wasn't inserted (it is too far away), so we must insert it in the other KBuckets
+          // The contact wasn't inserted (it is too far away), so it must inserted in the other KBuckets
           case (false, None) => {
             val (newRoot, result) = this.rootIDSpace.insert(contact)
             this.rootIDSpace = newRoot
