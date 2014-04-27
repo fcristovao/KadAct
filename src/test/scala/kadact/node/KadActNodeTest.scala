@@ -29,8 +29,6 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     TestKit.shutdownActorSystem(system)
   }
 
-  implicit def intToKey(int: Int): Key = BigInt(int)
-
   "A KadActNode actor" must {
     "be able to start" in {
       start(newKadActNode())
