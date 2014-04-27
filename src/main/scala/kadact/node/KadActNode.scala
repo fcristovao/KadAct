@@ -45,8 +45,8 @@ object KadActNode {
     BigInt(config.B, random)
   }
 
-  def isValidKey(key: Key)(implicit config: KadActConfig): Boolean = {
-    key >= BigInt(0) && key < BigInt(2).pow(config.B)
+  def isValidId(id: GenericID)(implicit config: KadActConfig): Boolean = {
+    id >= BigInt(0) && id < BigInt(2).pow(config.B)
   }
 }
 
@@ -59,6 +59,8 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
   import routing.RoutingTable._
   import context._
   import kadact.messages._
+
+  require(isValidId(nodeID), "The provided nodeId ("+nodeID+") is not valid.")
 
   class RoutingTableActorProducer(originalNode: Contact) extends IndirectActorProducer with Injectable {
     override def actorClass = classOf[RoutingTable]
@@ -191,14 +193,14 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
     }
 
     // Interface messages:
-    case Event(msg @ AddToNetwork(key, value), _) if isValidKey(key) => {
+    case Event(msg @ AddToNetwork(key, value), _) if isValidId(key) => {
       val nextGen = generationIterator.next()
       val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)), "AddToNetworkActor" + nextGen + "")
       tmp.forward(msg)
       stay()
     }
 
-    case Event(msg @ AddToNetwork(key, value), _) if !isValidKey(key) => {
+    case Event(msg @ AddToNetwork(key, value), _) if !isValidId(key) => {
       stay replying Error(InvalidKey(key))
     }
 

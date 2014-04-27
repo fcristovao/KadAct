@@ -1,16 +1,23 @@
 package kadact.node
 
-import akka.testkit.{ImplicitSender, TestKit}
+import akka.testkit.{EventFilter, TestFSMRef, ImplicitSender, TestKit}
 import org.scalatest._
 import kadact.config.TestKadActConfig
 import com.typesafe.config.ConfigFactory
-import akka.actor.{ActorRef, Props, ActorSystem}
+import akka.actor._
 import kadact.node.KadActNode._
 import kadact.config.modules.{LookupManagerModule, RoutingTableModule}
 import kadact.node.KadActNode.AddToNetwork
 import akka.util.Timeout
 import scala.concurrent.duration._
 import scala.concurrent.Await
+import kadact.node.KadActNode.InvalidKey
+import kadact.node.KadActNode.Join
+import kadact.node.KadActNode.AddToNetwork
+import kadact.node.KadActNode.GetFromNetwork
+import scala.Some
+import kadact.node.KadActNode.Error
+import kadact.node.Contact
 
 
 class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
@@ -26,25 +33,40 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
 
   implicit def intToKey(int: Int): Key = BigInt(int)
 
-  "An KadActNode actor" when {
+  "A KadActNode actor" must {
+    "be able to start" in {
+      start(newKadActNode())
+    }
+    "return the Contact with the correct nodeId" in {
+      val nodeFSM = start(newKadActNode(0))
+      nodeFSM ! GetContact
+      expectMsg(Contact(BigInt(0), nodeFSM))
+    }
+    "always answer its contact" in {
+      val nodeFSM = newKadActNode(0)
+      nodeFSM ! GetContact
+      expectMsgClass(classOf[Contact])
+      nodeFSM ! Start
+      expectMsg(Done)
+      nodeFSM ! GetContact
+      expectMsgClass(classOf[Contact])
+    }
+    "refuse to store a key that it's outside of its space" in {
+      val nodeFSM = start(newKadActNode())
+      val key: Key = 16 // The testKadActConfig has b=4 which means 15 is the biggest key allowed
+
+      nodeFSM ! AddToNetwork(key, 10)
+      expectMsg(Error(InvalidKey(key)))
+    }
+    "refuse to be created with an invalid Id" in {
+      EventFilter[ActorInitializationException](occurrences = 1) intercept {
+        newKadActNode(16) // The testKadActConfig has b=4 which means 15 is the biggest key allowed
+      }
+    }
+  }
+
+  "A KadActNode actor" when {
     "alone in the network" must {
-      "be able to start" in {
-        start(newKadActNode())
-      }
-      "return the Contact with the correct nodeId" in {
-        val nodeFSM = start(newKadActNode(0))
-        nodeFSM ! GetContact
-        expectMsg(Contact(BigInt(0), nodeFSM))
-      }
-      "always answer its contact" in {
-        val nodeFSM = system.actorOf(Props(new KadActNode[Int]()))
-        nodeFSM ! GetContact
-        expectMsgClass(classOf[Contact])
-        nodeFSM ! Start
-        expectMsg(Done)
-        nodeFSM ! GetContact
-        expectMsgClass(classOf[Contact])
-      }
       "be able to store values" in {
         val nodeFSM = start(newKadActNode())
         val key: Key = BigInt(1)
@@ -69,14 +91,8 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         nodeFSM ! GetFromNetwork(key)
         expectMsg(None)
       }
-      "refuse to store a key that it's outside of it's space" in {
-        val nodeFSM = start(newKadActNode())
-        val key: Key = 16 // The testKadActConfig has b=4 which means 15 is the biggest key allowed
-
-        nodeFSM ! AddToNetwork(key, 10)
-        expectMsg(Error(InvalidKey(key)))
-      }
     }
+
     "with one other node in the network" must {
       "be able to join it" in {
         createKadActNetwork(0, 15)
@@ -92,10 +108,26 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         expectMsg(None)
       }
       "handle the FindNode protocol message" in {
-        val first :: second :: Nil = createKadActNetwork(0, 15)
+        val first :: second :: _ = createKadActNetwork(0, 15)
         first.node ! kadact.messages.FindNode(second, 0, 0) // Look for key 0 in node 0
         expectMsg(kadact.messages.FindNodeResponse(first, 0, Set(first)))
         //^- "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor."
+      }
+      "handle the FindValue protocol message" in {
+        val first :: second :: _ = createKadActNetwork(0, 15)
+        first.node ! kadact.messages.FindValue(second, 0, 0) // Look for key 0 in node 0
+        expectMsg(kadact.messages.FindValueResponse(first, 0, Right(Set(first))))
+        // ^-- No value was set in the node yet, so it should return a list of nodes
+      }
+      "handle the Ping protocol message" in {
+        val first :: second :: _ = createKadActNetwork(0, 15)
+        first.node ! kadact.messages.Ping(second, 0)
+        expectMsg(kadact.messages.Pong(first, 0))
+      }
+      "handle the Store protocol message" in {
+        val first :: second :: _ = createKadActNetwork(0, 15)
+        first.node ! kadact.messages.Store(second, generation = 0, 0, 0)
+        expectMsg(kadact.messages.StoreResponse(first, generation = 0))
       }
       "get previously stored values when requested to the same node" in {
         val first :: _ = createKadActNetwork(0, 15)
@@ -142,6 +174,12 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         }
       }
     }
+
+    "when the network is full of nodes" must {
+      "be able to create such a network" in {
+        val nodes = createKadActNetwork(0 to 15 : _*)
+      }
+    }
   }
 
   def start(node: ActorRef) = {
@@ -159,7 +197,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     Await.result((node ? GetContact).mapTo[Contact], timeout.duration)
   }
 
-  def createKadActNetwork(ids: Int*) = {
+  def createKadActNetwork(ids: Int*) : List[Contact] = {
     val original = start(newKadActNode(ids.head))
     val originalContact = getContact(original)
 
@@ -173,6 +211,5 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
       }
     contacts.reverse
   }
-
 
 }
