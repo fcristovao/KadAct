@@ -41,9 +41,8 @@ object IdDistanceSpace {
   }
 }
 
-case class SplittedIDSpace(var lower: IdDistanceSpace, var greater: IdDistanceSpace)(implicit config: KadActConfig) extends IdDistanceSpace(
-  lower.origin, lower.depth - 1, lower.startDistance
-) {
+case class SplittedIDSpace(var lower: IdDistanceSpace, var greater: IdDistanceSpace)(implicit config: KadActConfig)
+  extends IdDistanceSpace(lower.origin, lower.depth - 1, lower.startDistance) {
   override def insert(tsContact: TimestampedContact, distance: Distance): (IdDistanceSpace, Boolean) = {
     assert(lower.contains(distance) || greater.contains(distance))
 
@@ -99,7 +98,7 @@ case class SplittedIDSpace(var lower: IdDistanceSpace, var greater: IdDistanceSp
     val result = space.pickNNodesCloseTo(n, distance)
 
     if (result.size < n) {
-      (result union otherHalf(space).pickNNodesCloseTo(n - result.size, distance))
+      result union otherHalf(space).pickNNodesCloseTo(n - result.size, distance)
     } else {
       result
     }
