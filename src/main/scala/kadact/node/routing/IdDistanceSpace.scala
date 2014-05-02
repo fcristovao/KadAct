@@ -90,8 +90,11 @@ case class SplittedIdSpace(var lower: IdDistanceSpace, var greater: IdDistanceSp
 case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0, override val startDistance: Distance = 0)(implicit config: KadActConfig) extends IdDistanceSpace(origin, depth, startDistance) {
   val bucket: KBucket = new KBucket()
 
-  protected def isSplittable: Boolean = {
-    startDistance == 0
+  protected def shouldSplitToInclude(nodeId: NodeID): Boolean = {
+    val distance = kadact.node.distance(origin, nodeId)
+    val nodeIdInUpperHalfSpace = distance >= startDistance + (range / 2) && distance < (startDistance + range)
+    val thisIsLowerHalfIdSpace = startDistance == BigInt(0)
+    thisIsLowerHalfIdSpace && !nodeIdInUpperHalfSpace
   }
 
   def insert(tsContact: TimestampedContact): IdDistanceSpace = {
@@ -101,7 +104,7 @@ case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0,
     assert(this.contains(nodeId))
     val (inserted, _) = bucket.insertOrUpdate(tsContact)
 
-    if (!inserted && isSplittable) {
+    if (!inserted && shouldSplitToInclude(nodeId)) {
       val newIDSpace = split()
       newIDSpace.insert(tsContact)
     } else {
