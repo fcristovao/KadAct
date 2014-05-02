@@ -2,7 +2,7 @@ package kadact.node.routing
 
 import kadact.node._
 
-private[routing] class TimestampedContact(val timestamp: Long, val contact: Contact) extends Ordered[TimestampedContact] {
+private[routing] case class TimestampedContact(timestamp: Long, contact: Contact) extends Ordered[TimestampedContact] {
   override def compare(that: TimestampedContact): Int = LeastRecentlySeenOrdering.compare(this, that)
 
   def isOlderThan(that: TimestampedContact): Boolean = timestamp.compare(that.timestamp) < 0
