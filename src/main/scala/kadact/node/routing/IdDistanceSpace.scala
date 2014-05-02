@@ -8,6 +8,7 @@ import kadact.node.Contact
 abstract class IdDistanceSpace(val origin: NodeID, val depth: Int, val startDistance: Distance)(implicit config: KadActConfig) {
   val range = BigInt(2).pow(config.B - depth)
   val rand = new Random()
+  val endDistance = startDistance + range
 
   def insert(contact: Contact): IdDistanceSpace = {
     insert(new TimestampedContact(System.currentTimeMillis(), contact))
@@ -17,7 +18,7 @@ abstract class IdDistanceSpace(val origin: NodeID, val depth: Int, val startDist
 
   def contains(nodeId: NodeID): Boolean = {
     val distance = kadact.node.distance(origin, nodeId)
-    distance >= startDistance && distance < (startDistance + range)
+    distance >= startDistance && distance < endDistance
   }
 
   def pickNNodesCloseTo(n: Int, nodeId: NodeID): Set[Contact]
@@ -57,7 +58,7 @@ case class SplittedIdSpace(var lower: IdDistanceSpace, var greater: IdDistanceSp
     val distance = kadact.node.distance(origin, nodeId)
     if (lower.contains(nodeId) || distance < startDistance) {
       lower
-    } else if (greater.contains(nodeId) || distance >= startDistance + range) {
+    } else if (greater.contains(nodeId) || distance >= endDistance) {
       greater
     } else {
       throw new Exception("this should never happen")
@@ -90,21 +91,18 @@ case class SplittedIdSpace(var lower: IdDistanceSpace, var greater: IdDistanceSp
 case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0, override val startDistance: Distance = 0)(implicit config: KadActConfig) extends IdDistanceSpace(origin, depth, startDistance) {
   val bucket: KBucket = new KBucket()
 
-  protected def shouldSplitToInclude(nodeId: NodeID): Boolean = {
-    val distance = kadact.node.distance(origin, nodeId)
-    val nodeIdInUpperHalfSpace = distance >= startDistance + (range / 2) && distance < (startDistance + range)
-    val thisIsLowerHalfIdSpace = startDistance == BigInt(0)
-    thisIsLowerHalfIdSpace && !nodeIdInUpperHalfSpace
+  protected def isSplittable: Boolean = {
+    startDistance == BigInt(0)
   }
 
   def insert(tsContact: TimestampedContact): IdDistanceSpace = {
     val nodeId = tsContact.contact.nodeID
     //"[KademliaSpec] A node should never put its own NodeID into a bucket as a contact"
     require(nodeId != origin, "Cannot insert the contact referring to the origin node: " + origin)
-    assert(this.contains(nodeId))
+    require(contains(nodeId), "Node "+ nodeId+" cannot be inserted in space range ["+startDistance+","+endDistance+"[")
     val (inserted, _) = bucket.insertOrUpdate(tsContact)
 
-    if (!inserted && shouldSplitToInclude(nodeId)) {
+    if (!inserted && isSplittable) {
       val newIDSpace = split()
       newIDSpace.insert(tsContact)
     } else {
@@ -116,9 +114,11 @@ case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0,
     val lower = new LeafIdSpace(origin, depth + 1, startDistance)
     val greater = new LeafIdSpace(origin, depth + 1, startDistance + (range / 2))
 
+    // TODO: This is a bug. It will reset all the timestamps in the contacts
     bucket.filter(contact => lower.contains(contact.nodeID))
     .foreach(lower.insert(_))
 
+    // TODO: This is a bug. It will reset all the timestamps in the contacts
     bucket.filter(contact => greater.contains(contact.nodeID))
     .foreach(greater.insert(_))
 
@@ -126,9 +126,6 @@ case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0,
   }
 
   override def pickNNodesCloseTo(n: Int, nodeId: NodeID): Set[Contact] = {
-    assert(
-      this.contains(nodeId)
-    ) // this assertion may not hold, because we might have to look for Nodes when the nearest bucket did not have the required k entries
     bucket.pickNNodes(n)
   }
 
