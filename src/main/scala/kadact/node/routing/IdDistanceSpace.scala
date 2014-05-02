@@ -9,11 +9,11 @@ abstract class IdDistanceSpace(val origin: NodeID, val depth: Int, val startDist
   val range = BigInt(2).pow(config.B - depth)
   val rand = new Random()
 
-  def insert(contact: Contact): (IdDistanceSpace, Boolean) = {
+  def insert(contact: Contact): IdDistanceSpace = {
     insert(new TimestampedContact(System.currentTimeMillis(), contact))
   }
 
-  def insert(tsContact: TimestampedContact): (IdDistanceSpace, Boolean)
+  def insert(tsContact: TimestampedContact): IdDistanceSpace
 
   def contains(nodeId: NodeID): Boolean = {
     val distance = kadact.node.distance(origin, nodeId)
@@ -35,23 +35,18 @@ object IdDistanceSpace {
   }
 }
 
-case class SplittedIDSpace(var lower: IdDistanceSpace, var greater: IdDistanceSpace)(implicit config: KadActConfig)
+case class SplittedIdSpace(var lower: IdDistanceSpace, var greater: IdDistanceSpace)(implicit config: KadActConfig)
   extends IdDistanceSpace(lower.origin, lower.depth - 1, lower.startDistance) {
-  override def insert(tsContact: TimestampedContact): (IdDistanceSpace, Boolean) = {
+  override def insert(tsContact: TimestampedContact): IdDistanceSpace = {
     val nodeId = tsContact.contact.nodeID
     assert(lower.contains(nodeId) || greater.contains(nodeId))
 
-    val result =
-      if (lower.contains(nodeId)) {
-        val (newLower, result) = lower.insert(tsContact)
-        lower = newLower
-        result
-      } else {
-        val (newGreater, result) = greater.insert(tsContact)
-        greater = newGreater
-        result
-      }
-    (this, result)
+    if (lower.contains(nodeId)) {
+      lower = lower.insert(tsContact)
+    } else {
+      greater = greater.insert(tsContact)
+    }
+    this
   }
 
   override def selectRandomNodeIDs(): Set[NodeID] = {
@@ -99,7 +94,7 @@ case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0,
     startDistance == 0
   }
 
-  def insert(tsContact: TimestampedContact): (IdDistanceSpace, Boolean) = {
+  def insert(tsContact: TimestampedContact): IdDistanceSpace = {
     val nodeId = tsContact.contact.nodeID
     //"[KademliaSpec] A node should never put its own NodeID into a bucket as a contact"
     require(nodeId != origin, "Cannot insert the contact referring to the origin node: " + origin)
@@ -110,23 +105,21 @@ case class LeafIdSpace(override val origin: NodeID, override val depth: Int = 0,
       val newIDSpace = split()
       newIDSpace.insert(tsContact)
     } else {
-      (this, false)
+      this
     }
   }
 
-  def split(): SplittedIDSpace = {
+  def split(): SplittedIdSpace = {
     val lower = new LeafIdSpace(origin, depth + 1, startDistance)
     val greater = new LeafIdSpace(origin, depth + 1, startDistance + (range / 2))
 
-    bucket.
-    filter(contact => lower.contains(contact.nodeID)).
-    foreach(lower.insert(_))
+    bucket.filter(contact => lower.contains(contact.nodeID))
+    .foreach(lower.insert(_))
 
-    bucket.
-    filter(contact => greater.contains(contact.nodeID)).
-    foreach(greater.insert(_))
+    bucket.filter(contact => greater.contains(contact.nodeID))
+    .foreach(greater.insert(_))
 
-    SplittedIDSpace(lower, greater)
+    SplittedIdSpace(lower, greater)
   }
 
   override def pickNNodesCloseTo(n: Int, nodeId: NodeID): Set[Contact] = {

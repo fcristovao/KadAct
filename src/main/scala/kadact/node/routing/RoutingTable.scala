@@ -45,13 +45,11 @@ class RoutingTable(origin: NodeID)(implicit config: KadActConfig) extends Actor 
           }
           // The contact wasn't inserted (it is too far away), so it must inserted in the other KBuckets
           case (false, None) => {
-            val (newRoot, result) = this.rootIDSpace.insert(contact)
-            this.rootIDSpace = newRoot
+            this.rootIDSpace = this.rootIDSpace.insert(contact)
           }
           // The contact was inserted and one contact that already existed now must be inserted in the KBuckets
           case (true, Some(removedContact)) => {
-            val (newRoot, result) = this.rootIDSpace.insert(removedContact)
-            this.rootIDSpace = newRoot
+            this.rootIDSpace = this.rootIDSpace.insert(removedContact)
           }
         }
       }
