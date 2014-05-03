@@ -1,8 +1,9 @@
-package kadact.node.routing
+package kadact.node.routing.buckets
 
 import scala.collection.immutable.TreeSet
 import kadact.node._
 import kadact.config.KadActConfig
+import kadact.node.routing.{ClosestToOrdering, LeastRecentlySeenOrdering, TimestampedContact}
 
 class SBucket(origin: NodeID)(implicit config: KadActConfig) extends Bucket(5 * config.s) {
   override var queue = new TreeSet[TimestampedContact]()(LeastRecentlySeenOrdering)

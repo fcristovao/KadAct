@@ -1,8 +1,9 @@
-package kadact.node.routing
+package kadact.node.routing.buckets
 
 import scala.collection.immutable.TreeSet
 
 import kadact.node.Contact
+import kadact.node.routing.TimestampedContact
 
 abstract class Bucket(val maxSize: Int) {
   def queue: TreeSet[TimestampedContact]

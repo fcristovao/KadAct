@@ -4,6 +4,7 @@ import scala.util.Random
 import kadact.node._
 import kadact.config.KadActConfig
 import kadact.node.Contact
+import kadact.node.routing.buckets.KBucket
 
 abstract class IdDistanceSpace(val origin: NodeID, val depth: Int, val startDistance: Distance)(implicit config: KadActConfig) {
   val range = BigInt(2).pow(config.B - depth)

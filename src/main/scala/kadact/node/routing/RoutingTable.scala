@@ -6,6 +6,7 @@ import kadact.node._
 import scala.collection.immutable.TreeSet
 import kadact.config.KadActConfig
 import scaldi.{Injector, Injectable}
+import kadact.node.routing.buckets.SBucket
 
 
 object RoutingTable {
