@@ -16,6 +16,7 @@ import kadact.node.KadActNode.AddToNetwork
 import kadact.node.KadActNode.GetFromNetwork
 import scala.Some
 import kadact.node.KadActNode.Error
+import scala.util.Random
 
 
 class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
@@ -36,7 +37,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     "return the Contact with the correct nodeId" in {
       val nodeFSM = start(newKadActNode(0))
       nodeFSM ! GetContact
-      expectMsg(Contact(BigInt(0), nodeFSM))
+      expectMsg(Contact(0, nodeFSM))
     }
     "always answer its contact" in {
       val nodeFSM = newKadActNode(0)
@@ -65,14 +66,14 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     "alone in the network" must {
       "be able to store values" in {
         val nodeFSM = start(newKadActNode())
-        val key: Key = BigInt(1)
+        val key: Key = 1
 
         nodeFSM ! AddToNetwork(key, 10)
         expectMsg(Done)
       }
       "get previously stored values" in {
         val nodeFSM = start(newKadActNode())
-        val key: Key = BigInt(1)
+        val key: Key = 1
 
         nodeFSM ! AddToNetwork(key, 10)
         expectMsg(Done)
@@ -82,7 +83,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
       }
       "not get a value that was never inserted" in {
         val nodeFSM = start(newKadActNode())
-        val key: Key = BigInt(1)
+        val key: Key = 1
 
         nodeFSM ! GetFromNetwork(key)
         expectMsg(None)
@@ -94,7 +95,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         createKadActNetwork(0, 15)
       }
       "not get a value that was never inserted" in {
-        val first :: second :: Nil = createKadActNetwork(0, 15)
+        val first :: second :: _ = createKadActNetwork(0, 15)
         val key: Key = 1
 
         first.node ! GetFromNetwork(key)
@@ -136,7 +137,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         expectMsg(Some(10))
       }
       "get previously stored values when requested to another node (1)" in {
-        val first :: second :: Nil = createKadActNetwork(0, 15)
+        val first :: second :: _ = createKadActNetwork(0, 15)
         val key: Key = 1
 
         first.node ! AddToNetwork(key, 10)
@@ -146,7 +147,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         expectMsg(Some(10))
       }
       "get previously stored values when requested to another node (2)" in {
-        val first :: second :: Nil = createKadActNetwork(0, 15)
+        val first :: second :: _ = createKadActNetwork(0, 15)
         val key: Key = 1
 
         second.node ! AddToNetwork(key, 10)
@@ -172,8 +173,60 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
     }
 
     "when the network is full of nodes" must {
-      "be able to create such a network" ignore {
-        val nodes = createKadActNetwork(0 to 15: _*)
+      "be able to create such a network, all joining through one node" in {
+        createKadActNetwork(0 to 15: _*)
+      }
+      "be able to create such a network, all joining through the node that previously joined" in {
+        createKadActNetwork((contacts) => contacts.head, 0 to 15: _*)
+      }
+      "be able to create such a network, all joining through random nodes (1)" in {
+        val random = new Random(0)
+        createKadActNetwork((contacts) => contacts(random.nextInt(contacts.size)), 0 to 15: _*)
+      }
+      "be able to create such a network, all joining through random nodes (2)" in {
+        val random = new Random(0)
+        val ids = random.shuffle((0 to 15).toList)
+        createKadActNetwork((contacts) => contacts(random.nextInt(contacts.size)), ids: _*)
+      }
+      "not get a value that was never inserted" in {
+        val contacts = createKadActNetwork(0 to 15: _*)
+        val key: Key = 1
+
+        for (contact <- contacts) {
+          contact.node ! GetFromNetwork(key)
+          expectMsg(None)
+        }
+      }
+      "get previously stored values when requested to the same node" in {
+        val contacts = createKadActNetwork(0 to 15: _*)
+        val key: Key = 1
+
+        contacts(0).node ! AddToNetwork(key, 10)
+        expectMsg(Done)
+
+        contacts(0).node ! GetFromNetwork(key)
+        expectMsg(Some(10))
+      }
+      "get previously stored values when requested from the other nodes" ignore {
+        val contacts = createKadActNetwork(0 to 15: _*)
+        val key: Key = 1
+
+        contacts(0).node ! AddToNetwork(key, 10)
+        expectMsg(Done)
+
+        for (contact <- contacts) {
+          contact.node ! GetFromNetwork(key)
+          expectMsg(Some(10))
+        }
+      }
+      "not allow another node to join the network" ignore {
+        // The likelihood of this happening is next to none. Ignore it for now
+      }
+    }
+
+    "when the network is averagely sized" must {
+      "not allow a node to choose a nodeId that already exists" ignore {
+        //TODO: implement it
       }
     }
   }
@@ -194,14 +247,18 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
   }
 
   def createKadActNetwork(ids: Int*): List[Contact] = {
-    val original = start(newKadActNode(ids.head))
-    val originalContact = getContact(original)
+    val selectionFunction = (contacts: List[Contact]) => contacts.last
+    createKadActNetwork(selectionFunction, ids: _*)
+  }
 
+  def createKadActNetwork(nodeSelectionFunction: (List[Contact]) => Contact, ids: Int*): List[Contact] = {
+    val originNode = start(newKadActNode(ids.head))
     val contacts =
-      ids.tail.foldLeft(List(originalContact)) {
+      ids.tail.foldLeft(List(getContact(originNode))) {
         (contactsSoFar, id) =>
-          val joining = newKadActNode(id) // the farthest away
-          joining ! Join(originalContact)
+          val joining = newKadActNode(id)
+          val joinTo = nodeSelectionFunction(contactsSoFar)
+          joining ! Join(joinTo)
           expectMsg(Done)
           getContact(joining) :: contactsSoFar
       }
