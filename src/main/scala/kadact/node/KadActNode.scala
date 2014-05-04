@@ -50,9 +50,10 @@ object KadActNode {
   }
 }
 
-class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector: Injector) extends Actor
-                                                                                                   with FSM[KadActNode.State, KadActNode.Data]
-                                                                                                   with LoggingFSM[KadActNode.State, KadActNode.Data] {
+class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector: Injector)
+  extends Actor
+          with FSM[KadActNode.State, KadActNode.Data]
+          with LoggingFSM[KadActNode.State, KadActNode.Data] {
   import KadActNode._
 
   import routing.RoutingTable._
@@ -81,7 +82,7 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
       (routingTable ? PickNNodesCloseTo(config.k, nodeID))(30 seconds).mapTo[Set[Contact]], Duration.Inf
     )
     var result = new TreeSet[Contact]()(kadact.node.ContactClosestToOrdering(nodeID))
-    result ++= routingTableNodes;
+    result ++= routingTableNodes
     result += selfContact
     result.take(config.k)
   }
@@ -196,8 +197,6 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
     case Event(GetFromNetwork(key), StoredValues(storedValues: HashMap[Key, V])) => {
       stay replying storedValues.get(key)
     }
-
-
   }
 
   whenUnhandled {

@@ -10,6 +10,7 @@ import scala.concurrent.duration._
 import kadact.node.Contact
 import kadact.node.routing.RoutingTable.PickNNodesCloseTo
 import kadact.nodeForTest._
+import kadact.node.lookup.LookupManager.{LookupNodeResponse, LookupNode}
 
 class NodeLookupTest extends TestKit(ActorSystem("test", ConfigFactory.load("application-test")))
                              with WordSpecLike
@@ -34,12 +35,12 @@ class NodeLookupTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         // The only KadActNode in the network is the one that we are working for
         val nodeId = BigInt(0)
         val contact = Contact(nodeId, mockKadActNode.ref)
-        val nodeLookup = system.actorOf(Props(new NodeLookup(contact, mockRoutingTable.ref)))
-        nodeLookup ! NodeLookup.LookupNode(generation, nodeId)
+        val nodeLookup = system.actorOf(Props(new NodeLookup(contact, mockRoutingTable.ref, generation)))
+        nodeLookup ! LookupNode(nodeId)
         mockRoutingTable.expectMsg(PickNNodesCloseTo(config.alpha, nodeId))
         mockRoutingTable.reply(Set[Contact]()) // The routing table should never contain the node it works for
 
-        expectMsg(NodeLookup.LookupNodeResponse(generation, nodeId, Set[Contact](contact)))
+        expectMsg(LookupNodeResponse(nodeId, Set[Contact](contact)))
       }
     }
     "there's two nodes in the network" must {
@@ -47,10 +48,10 @@ class NodeLookupTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         /* Two nodes, Ids 0 and 8 */
         val (probes, contacts) = mockContacts(0, 8)
 
-        val nodeLookup = system.actorOf(Props(new NodeLookup(contacts(0), mockRoutingTable.ref)))
+        val nodeLookup = system.actorOf(Props(new NodeLookup(contacts(0), mockRoutingTable.ref, generation)))
         val nodeId = BigInt(0)
 
-        nodeLookup ! NodeLookup.LookupNode(generation, nodeId)
+        nodeLookup ! LookupNode(nodeId)
 
         mockRoutingTable.expectMsg(PickNNodesCloseTo(config.alpha, nodeId))
         mockRoutingTable.reply(Set[Contact](contacts(1)))
@@ -60,7 +61,7 @@ class NodeLookupTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
           kadact.messages.FindNodeResponse(contacts(1), generation, Set(contacts(1)))
         ) //returns itself as the only contact
 
-        expectMsg(NodeLookup.LookupNodeResponse(generation, nodeId, Set[Contact](contacts(0), contacts(1))))
+        expectMsg(LookupNodeResponse(nodeId, Set[Contact](contacts(0), contacts(1))))
       }
     }
   }

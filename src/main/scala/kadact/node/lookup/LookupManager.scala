@@ -1,7 +1,6 @@
 package kadact.node.lookup
 
 import akka.actor._
-import akka.event.LoggingReceive
 import kadact.node._
 import scala.collection.immutable.Queue
 import kadact.config.KadActConfig
@@ -38,7 +37,8 @@ object LookupManager {
     }
   }
 
-  case class Data(idleList: List[ActorRef] = Nil, workingList: List[ActorRef] = Nil, awaitingActors: Map[Int, ActorRef] = Map(), pendingLookups: Queue[(Messages, ActorRef)] = Queue())
+  case class Data(workingActors: List[ActorRef] = Nil,
+                  pendingLookups: Queue[(Messages, ActorRef)] = Queue())
 }
 
 trait LookupManagerFactory {
@@ -52,9 +52,10 @@ class LookupManagerProducer[V](originalNode: Contact, routingTable: ActorRef)(im
   override def produce = inject[LookupManagerFactory].build(originalNode, routingTable)
 }
 
-class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor
-                                                                                                             with FSM[LookupManager.State, LookupManager.Data]
-                                                                                                             with LoggingFSM[LookupManager.State, LookupManager.Data] {
+class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig)
+  extends Actor
+          with FSM[LookupManager.State, LookupManager.Data]
+          with LoggingFSM[LookupManager.State, LookupManager.Data] {
   import LookupManager._
 
   val generationIterator = Iterator from 0
@@ -62,54 +63,62 @@ class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit c
   startWith(Working, Data())
 
   when(Working) {
-    //There are idle LookupNodes available to take the request
-    case Event(Lookup(lookupType, id), currentData@Data(someWorker :: tail, workList, awaitingActors, _)) => {
+    case Event(Lookup(lookupType, id), currentData@Data(workingActors, _)) => {
       val nextGen = generationIterator.next()
 
-      lookupType match {
-        case Node => someWorker ! NodeLookup.LookupNode(nextGen, id)
-        case Value => //insert here the code for the value lookup
+      val workerActor = lookupType match {
+        case Node => {
+          val nodeLookupActor = context.actorOf(
+            Props(classOf[NodeLookup], originalNode, routingTable, nextGen, config),
+            "NodeLookup" + nextGen
+          )
+          nodeLookupActor forward LookupNode(id)
+          nodeLookupActor
+        }
+        /*
+      case Value => {
+        // Do the Value lookup
+      }
+      */
       }
 
-      stay using currentData
-                 .copy(idleList = tail, workingList = someWorker :: workList, awaitingActors = awaitingActors + (nextGen -> sender))
+      context.watch(workerActor)
+      val newWorkingActors = workerActor :: workingActors
+      if (newWorkingActors.size >= config.maxParallelLookups) {
+        goto(Full) using currentData.copy(workingActors = newWorkingActors)
+      } else {
+        stay using currentData.copy(workingActors = newWorkingActors)
+      }
     }
+  }
 
-    //No more idle LookupNodes exist, but we are yet allowed to create more to process this request
-    case Event(lookupMsg@Lookup(_, _), currentData@Data(Nil, workList, _, _)) if workList.size < config
-                                                                                                 .maxParallelLookups => {
-      //We just create a new actor and resend the message to be reprocessed. This is to avoid duplicate code, although penalizes performance
-      val someWorker = context.actorOf(Props(new LookupSplitter(this.self, originalNode, routingTable)))
-      //We can't use ! because it would make us the sender, and we don't want that.
-      self forward lookupMsg
-
-      stay using currentData.copy(List(someWorker))
-    }
-
-    //No idle LookupNodes exist, and we are no longer allowed to create another
-    case Event(lookupMsg@Lookup(_, _), currentData@Data(Nil, workList, awaitingActors, pendingLookups)) if workList
-                                                                                                           .size == config
-                                                                                                                    .maxParallelLookups => {
+  when(Full) {
+    case Event(lookupMsg@Lookup(_, _), currentData@Data(_, pendingLookups)) => {
       stay using currentData.copy(pendingLookups = pendingLookups.enqueue((lookupMsg, sender)))
     }
+  }
 
-    //We get a response from one of our minions :)
-    case Event(NodeLookup.LookupNodeResponse(generation, nodeID, contacts), currentData@Data(idleList, workingList, awaitingActors, pendingLookups)) => {
-      awaitingActors(generation) ! LookupNodeResponse(nodeID, contacts)
-
-      val newPendingLookups =
-        if (pendingLookups.size > 0) {
-          val ((lookupMsg, ancientSender), newQueue) = pendingLookups.dequeue
-          self.tell(lookupMsg, ancientSender)
-          newQueue
-        } else {
-          pendingLookups
-        }
-
-      stay using currentData
-                 .copy(idleList = sender :: idleList, workingList = workingList filterNot (_ == sender), awaitingActors = awaitingActors - generation, pendingLookups = newPendingLookups)
+  whenUnhandled {
+    // One of our minions has finished its work:
+    case Event(Terminated(workerActor), currentData@Data(workingActors, pendingLookups)) => {
+      val newWorkingActors = workingActors filter (_ != workerActor)
+      if (newWorkingActors.size >= config.maxParallelLookups) {
+        goto(Full) using currentData.copy(workingActors = newWorkingActors)
+      } else {
+        val newPendingLookups =
+          if (pendingLookups.isEmpty) {
+            pendingLookups
+          } else {
+            val ((lookupMsg, ancientSender), newQueue) = pendingLookups.dequeue
+            self.tell(lookupMsg, ancientSender)
+            newQueue
+          }
+        goto(Working) using currentData.copy(
+          workingActors = newWorkingActors,
+          pendingLookups = newPendingLookups
+        )
+      }
     }
-
   }
 
   initialize()
