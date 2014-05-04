@@ -185,7 +185,7 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
     // Interface messages:
     case Event(msg@AddToNetwork(key, value), _) if isValidId(key) => {
       val nextGen = generationIterator.next()
-      val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)), "AddToNetworkActor" + nextGen + "")
+      val tmp = actorOf(Props(new AddToNetworkActor(selfContact, nextGen, routingTable, lookupManager)), "AddToNetworkActor" + nextGen)
       tmp.forward(msg)
       stay()
     }
@@ -194,8 +194,11 @@ class KadActNode[V](val nodeID: NodeID)(implicit config: KadActConfig, injector:
       stay replying Error(InvalidKey(key))
     }
 
-    case Event(GetFromNetwork(key), StoredValues(storedValues: HashMap[Key, V])) => {
-      stay replying storedValues.get(key)
+    case Event(msg@GetFromNetwork(key), StoredValues(storedValues: HashMap[Key, V])) => {
+      val nextGen = generationIterator.next()
+      val tmp = actorOf(Props(new GetFromNetworkActor(lookupManager)), "GetFromNetworkActor" + nextGen)
+      tmp.forward(msg)
+      stay()
     }
   }
 
