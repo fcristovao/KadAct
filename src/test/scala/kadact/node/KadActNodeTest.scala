@@ -219,6 +219,31 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
           expectMsg(Some(10))
         }
       }
+      "be able to store and retrieve the whole range of keys when requested to the same node" in {
+        val contacts = createKadActNetwork(0 to 15: _*)
+
+        for (key <- 0 to 15) {
+          contacts(0).node ! AddToNetwork(key, key * 100)
+          expectMsg(Done)
+        }
+        for (key <- 0 to 15) {
+          contacts(0).node ! GetFromNetwork(key)
+          expectMsg(Some(key * 100))
+        }
+      }
+      "be able to store and retrieve the whole range of keys from the other nodes" ignore {
+        val contacts = createKadActNetwork(0 to 15: _*)
+
+        for (key <- 0 to 15) {
+          contacts(0).node ! AddToNetwork(key, key * 100)
+          expectMsg(Done)
+        }
+        for (contact <- contacts;
+             key <- 0 to 15) {
+          contact.node ! GetFromNetwork(key)
+          expectMsg(Some(key * 100))
+        }
+      }
       "not allow another node to join the network" ignore {
         // The likelihood of this happening is next to none. Ignore it for now
       }
