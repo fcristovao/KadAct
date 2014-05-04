@@ -45,8 +45,8 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
   }
 
   def sendStoreValue(contact: Contact, key: Key, value: V) {
-      setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup)
-      contact.node ! Store(originalNode, generation, key, value)
+    setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup)
+    contact.node ! Store(originalNode, generation, key, value)
   }
 
   def cancelRemainingTimers(awaitingForContacts: Set[Contact]) {
@@ -61,9 +61,9 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
     case Event(msg@LookupValue(key), _) =>
       routingTable ! PickNNodesCloseTo(config.alpha, key)
       val ordering = ContactClosestToOrdering(key)
-      // Our own node is always considered as active and always the closest until one better is found
-      val activeSet = new TreeSet[Contact]()(ordering) + originalNode
-      val unaskedSet = new TreeSet[Contact]()(ordering)
+      val activeSet = new TreeSet[Contact]()(ordering)
+      // Our own node is always considered as a possibility to ask and always the closest until one better is found
+      val unaskedSet = new TreeSet[Contact]()(ordering) + originalNode
       goto(AwaitingContactsSet) using Working[V](
         request = sender -> msg,
         active = activeSet,
@@ -72,13 +72,10 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
   }
 
   when(AwaitingContactsSet) {
-    case Event(contactsSet: Set[Contact], currentData@Working((_, LookupValue(key)), _, _, _, _, _)) => {
-      if (contactsSet.isEmpty) {
-        goto(Answer)
-      } else {
-        broadcastFindValue(contactsSet, key)
-        goto(AwaitingResponses) using currentData.copy(waiting = contactsSet)
-      }
+    case Event(contacts: Set[Contact], currentData@Working((_, LookupValue(key)), _, unasked, _, _, _)) => {
+      val newWaiting = (unasked union contacts).take(config.alpha)
+      broadcastFindValue(newWaiting, key)
+      goto(AwaitingResponses) using currentData.copy(unasked = unasked -- newWaiting, waiting = newWaiting)
     }
   }
 
@@ -91,7 +88,7 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
 
       val newActive = active + from
       val alreadyContacted = newActive union awaiting union failed
-      val newUnasked = ((unasked union contacts) -- alreadyContacted) - originalNode
+      val newUnasked = (unasked union (contacts - originalNode)) -- alreadyContacted
       /* ^-- Drop 'originalNode' because:
        * "[KademliaSpec] The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor.
        * If the requestor does receive such a triple, it should discard it."
@@ -101,8 +98,7 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
 
       val newData = currentData.copy(unasked = newUnasked, waiting = newAwaiting, active = newActive)
 
-      // + 1 because we start with the originalNode, but want to find config.k more
-      if (newActive.size == config.k + 1 || newAwaiting.isEmpty) {
+      if (newActive.size == config.k || newAwaiting.isEmpty) {
         goto(Answer) using newData
       } else {
         broadcastFindValue(contactsSet, key)
@@ -142,9 +138,9 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
     case Event((), Working((answerTo, LookupValue(key)), active, _, awaiting, _, valueOption: Option[V])) => {
       // We've reached an answer, but we might already have sent requests to other nodes, that are now pending.
       cancelRemainingTimers(awaiting)
-      
+
       valueOption match {
-        case None =>  {
+        case None => {
           answerTo ! LookupValueResponse(key, Right(active.take(config.k)))
           stop()
         }
@@ -160,7 +156,7 @@ class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: 
 
   when(StoringValueInClosestNode) {
     case Event(StoreResponse(fromActor, storeGeneration), StoringValueInClosestNode(active, waitingFromActor, key -> value))
-    if storeGeneration == generation && waitingFromActor == fromActor => {
+      if storeGeneration == generation && waitingFromActor == fromActor => {
       cancelTimer(fromActor.nodeID.toString())
       routingTable ! Insert(fromActor)
 
