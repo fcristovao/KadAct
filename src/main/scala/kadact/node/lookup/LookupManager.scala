@@ -76,7 +76,7 @@ class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit c
             Props(classOf[ValueLookup[V]], originalNode, routingTable, nextGen, config),
             "ValueLookup" + nextGen
           )
-          valueLookupActor forward LookupNode(id)
+          valueLookupActor forward LookupValue(id)
           valueLookupActor
         }
       }
