@@ -83,7 +83,7 @@ class NodeLookup(originalNode: Contact, routingTable: ActorRef, generation: Int)
 
       val newActive = active + from
       val alreadyContacted = newActive union awaiting union failed
-      val newUnasked = ((unasked union contacts) -- alreadyContacted) - originalNode
+      val newUnasked = (unasked union (contacts - originalNode)) -- alreadyContacted
       /* ^-- Drop 'originalNode' because:
        * "[KademliaSpec] The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor.
        * If the requestor does receive such a triple, it should discard it."
