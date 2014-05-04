@@ -207,7 +207,7 @@ class KadActNodeTest extends TestKit(ActorSystem("test", ConfigFactory.load("app
         contacts(0).node ! GetFromNetwork(key)
         expectMsg(Some(10))
       }
-      "get previously stored values when requested from the other nodes" ignore {
+      "get previously stored values when requested from the other nodes" in {
         val contacts = createKadActNetwork(0 to 15: _*)
         val key: Key = 1
 
