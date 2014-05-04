@@ -1,110 +1,185 @@
 package kadact.node.lookup
 
 import akka.actor.{Actor, ActorRef, FSM, LoggingFSM}
-import akka.event.LoggingReceive
-import kadact.KadAct
 import kadact.node._
 import kadact.config.KadActConfig
-
-//There should be a NodeLookupManager to deal with the creation of NodeLookups
+import scala.collection.immutable.TreeSet
+import kadact.node.lookup.LookupManager.{LookupValueResponse, LookupValue}
 
 object ValueLookup {
   sealed trait State
   case object Idle extends State
+  case object AwaitingContactsSet extends State
   case object AwaitingResponses extends State
+  case object Answer extends State
+  case object StoringValueInClosestNode extends State
 
   sealed trait Messages
-  case class Timeout(contact: Contact) extends Messages
-  case class LookupValue(generation: Int, key: Key) extends Messages
-  case class LookupValueResponse[V](generation: Int, key: Key, answer: Either[V, Set[Contact]]) extends Messages
+  private case class Timeout(contact: Contact) extends Messages
 
-  case class Data(key: Option[Key] = None, generation: Int = -1, unasked: Set[Contact] = Set(), awaiting: Set[Contact] = Set(), failed: Set[Contact] = Set(), active: Set[Contact] = Set())
-
-  val NullData = Data()
+  sealed trait Data
+  case class Working[V](request: (ActorRef, LookupValue),
+                        active: Set[Contact],
+                        unasked: Set[Contact],
+                        waiting: Set[Contact] = Set(),
+                        failed: Set[Contact] = Set(),
+                        value: Option[V] = None) extends Data
+  case class StoringValueInClosestNode[V](active: Set[Contact], waiting: Contact, keyValue: (Key, V)) extends Data
+  case object NullData extends Data
 }
 
-class ValueLookup(master: ActorRef, originalNode: Contact, routingTable: ActorRef)(implicit config: KadActConfig) extends Actor
-                                                                                                                          with FSM[ValueLookup.State, ValueLookup.Data]
-                                                                                                                          with LoggingFSM[ValueLookup.State, ValueLookup.Data] {
+class ValueLookup[V](originalNode: Contact, routingTable: ActorRef, generation: Int)(implicit config: KadActConfig)
+  extends Actor
+          with FSM[ValueLookup.State, ValueLookup.Data]
+          with LoggingFSM[ValueLookup.State, ValueLookup.Data] {
+
   import ValueLookup._
+  import routing.RoutingTable._
   import kadact.messages._
 
-  def broadcastFindValue(contacts: Set[Contact], generation: Int, key: Key) {
+  def broadcastFindValue(contacts: Set[Contact], key: Key) {
     for (contact <- contacts) {
-      setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup, false)
+      setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup)
       contact.node ! FindValue(originalNode, generation, key)
+    }
+  }
+
+  def sendStoreValue(contact: Contact, key: Key, value: V) {
+      setTimer(contact.nodeID.toString(), Timeout(contact), config.Timeouts.nodeLookup)
+      contact.node ! Store(originalNode, generation, key, value)
+  }
+
+  def cancelRemainingTimers(awaitingForContacts: Set[Contact]) {
+    for (contact <- awaitingForContacts) {
+      cancelTimer(contact.nodeID.toString())
     }
   }
 
   startWith(Idle, NullData)
 
-
   when(Idle) {
-    case _ => stay
+    case Event(msg@LookupValue(key), _) =>
+      routingTable ! PickNNodesCloseTo(config.alpha, key)
+      val ordering = ContactClosestToOrdering(key)
+      // Our own node is always considered as active and always the closest until one better is found
+      val activeSet = new TreeSet[Contact]()(ordering) + originalNode
+      val unaskedSet = new TreeSet[Contact]()(ordering)
+      goto(AwaitingContactsSet) using Working[V](
+        request = sender -> msg,
+        active = activeSet,
+        unasked = unaskedSet
+      )
   }
-  /*
-  when(Idle) {
-    case Ev(LookupValue(receivedGeneration, key)) =>
-      val contactsSet = routingTable.?(PickNNodesCloseTo(KadAct.alpha, key))/*(timeout = Duration.Inf)*/.as[Set[Contact]].get
 
-      broadcastFindValue(contactsSet, receivedGeneration, key)
-
-      goto(AwaitingResponses) using Data(key = Some(key), generation = receivedGeneration, awaiting = contactsSet)
+  when(AwaitingContactsSet) {
+    case Event(contactsSet: Set[Contact], currentData@Working((_, LookupValue(key)), _, _, _, _, _)) => {
+      if (contactsSet.isEmpty) {
+        goto(Answer)
+      } else {
+        broadcastFindValue(contactsSet, key)
+        goto(AwaitingResponses) using currentData.copy(waiting = contactsSet)
+      }
+    }
   }
 
   when(AwaitingResponses) {
-    case Event(FindValueResponse(from, generation, Right(contacts)), currentData @ Data(Some(key), dataGeneration, unasked, awaiting, failed, active)) if dataGeneration == generation && awaiting.contains(from) => {
+    case Event(FindValueResponse(from, lookupGeneration, Right(contacts)), currentData@Working((_, LookupValue(key)), active, unasked, awaiting, failed, _))
+      if lookupGeneration == generation && awaiting.contains(from) => {
       cancelTimer(from.nodeID.toString())
 
       routingTable ! Insert(from)
 
-      val newActive = (active + from)
-      val newUnasked = ((unasked union contacts) - originalNode)
-      /* ^-- we drop 'originalNode' because it is said that "The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor.
-       * If the requestor does receive such a triple, it should discard it. A node must never put its own nodeID into a bucket as a contact."
+      val newActive = active + from
+      val alreadyContacted = newActive union awaiting union failed
+      val newUnasked = ((unasked union contacts) -- alreadyContacted) - originalNode
+      /* ^-- Drop 'originalNode' because:
+       * "[KademliaSpec] The recipient of a FIND_NODE should never return a triple containing the nodeID of the requestor.
+       * If the requestor does receive such a triple, it should discard it."
        */
-      val contactsSet = (newUnasked diff (awaiting union failed union active)).take(1)
-      val newAwaiting = ((awaiting - from) union contactsSet)
-      //What happens when newAwaiting is empty? we should terminate and answer our master
+      val contactsSet = newUnasked.take(1)
+      val newAwaiting = (awaiting - from) union contactsSet
 
-      if(newActive.size == KadAct.k || newAwaiting.isEmpty) {
-        master ! LookupValueResponse(generation, key, Right(newActive))
-        goto(Idle) using NullData
+      val newData = currentData.copy(unasked = newUnasked, waiting = newAwaiting, active = newActive)
+
+      // + 1 because we start with the originalNode, but want to find config.k more
+      if (newActive.size == config.k + 1 || newAwaiting.isEmpty) {
+        goto(Answer) using newData
       } else {
-        broadcastFindValue(contactsSet, generation, key)
-
-        stay using currentData.copy(unasked = newUnasked, awaiting = newAwaiting, active = newActive)
+        broadcastFindValue(contactsSet, key)
+        stay using newData
       }
     }
-    case Event(FindValueResponse(from, generation, lv @ Left(value)), currentData @ Data(Some(key), dataGeneration, unasked, awaiting, failed, active)) if dataGeneration == generation && awaiting.contains(from) => {
-      //Found the value in the network
+    case Event(FindValueResponse(from, lookupGeneration, Left(value)), currentData@Working((_, LookupValue(key)), active, unasked, awaiting, failed, _))
+      if lookupGeneration == generation && awaiting.contains(from) => {
       cancelTimer(from.nodeID.toString())
 
       routingTable ! Insert(from)
 
-      master ! LookupValueResponse(generation, key, lv)
-      goto(Idle) using NullData
+      goto(Answer) using currentData.copy(active = active + from, value = Some(value))
     }
+    case Event(Timeout(contact), currentData@Working((answerTo, LookupValue(key)), active, unasked, awaiting, failed, _))
+      if awaiting.contains(contact) => {
+      //contactsSet may be empty, but this code will only result in emptying the awaiting set and filling up the failed.
+      val contactsSet = unasked.take(1)
+      val newAwaiting = (awaiting - contact) union contactsSet
+      val newData = currentData.copy(
+        unasked = unasked -- contactsSet,
+        waiting = newAwaiting,
+        failed = failed + contact
+      )
 
-    case Event(Timeout(contact), currentData @ Data(Some(key), dataGeneration, unasked, awaiting, failed, active)) if awaiting.contains(contact) => {
-      val contactsSet = (unasked).take(1)
-
-      if(contactsSet.isEmpty && awaiting.size == 1){
-        //there's no one else to contact and we were the only ones left
-        master ! LookupValueResponse(dataGeneration, key, Right(active))
-        goto(Idle) using NullData
+      if (newAwaiting.size == 0) {
+        //there's no one else to contact
+        goto(Answer) using newData
       } else {
-        //here, contactsSet may be empty either, but this code will only result in emptying the awaiting set and filling up the failed. Must love higher order ops :)
-        val newFailed = (failed + contact)
-        val newUnasked = unasked diff contactsSet
-        val newAwaiting = (awaiting - contact) union contactsSet
-
-        broadcastFindValue(contactsSet, dataGeneration, key)
-
-        stay using currentData.copy(unasked = newUnasked, awaiting = newAwaiting, failed = newFailed)
+        broadcastFindValue(contactsSet, key)
+        stay using newData
       }
     }
   }
-  */
-  initialize
+
+  when(Answer) {
+    case Event((), Working((answerTo, LookupValue(key)), active, _, awaiting, _, valueOption: Option[V])) => {
+      // We've reached an answer, but we might already have sent requests to other nodes, that are now pending.
+      cancelRemainingTimers(awaiting)
+      
+      valueOption match {
+        case None =>  {
+          answerTo ! LookupValueResponse(key, Right(active.take(config.k)))
+          stop()
+        }
+        case Some(value) => {
+          answerTo ! LookupValueResponse(key, Left(value))
+          val closestNode = active.head
+          sendStoreValue(closestNode, key, value)
+          goto(StoringValueInClosestNode) using StoringValueInClosestNode(active.tail, closestNode, key -> value)
+        }
+      }
+    }
+  }
+
+  when(StoringValueInClosestNode) {
+    case Event(StoreResponse(fromActor, storeGeneration), StoringValueInClosestNode(active, waitingFromActor, key -> value))
+    if storeGeneration == generation && waitingFromActor == fromActor => {
+      cancelTimer(fromActor.nodeID.toString())
+      routingTable ! Insert(fromActor)
+
+      stop()
+    }
+    case Event(Timeout(fromActor), StoringValueInClosestNode(active, waitingFromActor, (key, value: V))) => {
+      if (active.isEmpty) {
+        stop()
+      } else {
+        val closestNode = active.head
+        sendStoreValue(closestNode, key, value)
+        stay using StoringValueInClosestNode(active.tail, closestNode, key -> value)
+      }
+    }
+  }
+
+  onTransition {
+    case _ -> Answer => self !()
+  }
+
+  initialize()
 }

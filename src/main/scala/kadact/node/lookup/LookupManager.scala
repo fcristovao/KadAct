@@ -8,11 +8,7 @@ import scala.Some
 import kadact.node.Contact
 import scaldi.{Injector, Injectable}
 
-//There should be a NodeLookupManager to deal with the creation of NodeLookups
-
 object LookupManager {
-  //import NodeLookup.{Lookup, LookupResponse}
-
   private[LookupManager] sealed trait State
   private[LookupManager] case object Working extends State
   private[LookupManager] case object Full extends State
@@ -75,11 +71,14 @@ class LookupManager[V](originalNode: Contact, routingTable: ActorRef)(implicit c
           nodeLookupActor forward LookupNode(id)
           nodeLookupActor
         }
-        /*
-      case Value => {
-        // Do the Value lookup
-      }
-      */
+        case Value => {
+          val valueLookupActor = context.actorOf(
+            Props(classOf[ValueLookup[V]], originalNode, routingTable, nextGen, config),
+            "ValueLookup" + nextGen
+          )
+          valueLookupActor forward LookupNode(id)
+          valueLookupActor
+        }
       }
 
       context.watch(workerActor)
